@@ -33,7 +33,7 @@ from api.utils.api_utils import get_data_error_result, get_json_result, server_e
 from rag.app.qa import beAdoc, rmPrefix
 from rag.app.tag import label_question
 from rag.nlp import rag_tokenizer, search
-from rag.prompts.generator import gen_meta_filter, cross_languages, keyword_extraction
+from rag.prompts.generator import gen_meta_filter, cross_languages, keyword_extraction, apply_metadata_filter
 from rag.settings import PAGERANK_FLD
 from rag.utils import rmSpace
 
@@ -55,6 +55,62 @@ def list_chunk():
         if not e:
             return get_data_error_result(message="Document not found!")
         kb_ids = KnowledgebaseService.get_kb_ids(tenant_id)
+        
+        # If no search keywords, use chunk_list with position sorting to maintain document order
+        if not question:
+            offset = (page - 1) * size
+            max_count = offset + size
+            fields = ["docnm_kwd", "content_with_weight", "img_id", "important_kwd", "question_kwd", "position_int", "available_int"]
+            chunks = settings.retriever.chunk_list(
+                doc_id=doc_id,
+                tenant_id=tenant_id,
+                kb_ids=kb_ids,
+                max_count=max_count,
+                offset=offset,
+                fields=fields,
+                sort_by_position=True
+            )
+            
+            # Filter by available_int if specified
+            if "available_int" in req:
+                available_int = int(req["available_int"])
+                chunks = [c for c in chunks if int(c.get("available_int", 1)) == available_int]
+            
+            # Calculate total count (need to fetch all chunks for accurate count)
+            all_chunks = settings.retriever.chunk_list(
+                doc_id=doc_id,
+                tenant_id=tenant_id,
+                kb_ids=kb_ids,
+                max_count=10000,  # Large number to get all chunks
+                offset=0,
+                fields=["available_int"],
+                sort_by_position=True
+            )
+            if "available_int" in req:
+                available_int = int(req["available_int"])
+                total = sum(1 for c in all_chunks if int(c.get("available_int", 1)) == available_int)
+            else:
+                total = len(all_chunks)
+            
+            res = {"total": total, "chunks": [], "doc": doc.to_dict()}
+            for chunk in chunks:
+                d = {
+                    "chunk_id": chunk.get("id", ""),
+                    "content_with_weight": chunk.get("content_with_weight", ""),
+                    "doc_id": doc_id,
+                    "docnm_kwd": chunk.get("docnm_kwd", ""),
+                    "important_kwd": chunk.get("important_kwd", []),
+                    "question_kwd": chunk.get("question_kwd", []),
+                    "image_id": chunk.get("img_id", ""),
+                    "available_int": int(chunk.get("available_int", 1)),
+                    "positions": chunk.get("position_int", []),
+                }
+                assert isinstance(d["positions"], list)
+                assert len(d["positions"]) == 0 or (isinstance(d["positions"][0], list) and len(d["positions"][0]) == 5)
+                res["chunks"].append(d)
+            return get_json_result(data=res)
+        
+        # If search keywords exist, use search method (relevance-based sorting)
         query = {
             "doc_ids": [doc_id], "page": page, "size": size, "question": question, "sort": True
         }
@@ -303,15 +359,19 @@ def retrieval_test():
     if req.get("search_id", ""):
         search_config = SearchService.get_detail(req.get("search_id", "")).get("search_config", {})
         meta_data_filter = search_config.get("meta_data_filter", {})
-        metas = DocumentService.get_meta_by_kbs(kb_ids)
-        if meta_data_filter.get("method") == "auto":
+        if meta_data_filter and meta_data_filter.get("method") != "disabled":
+            metas = DocumentService.get_meta_by_kbs(kb_ids)
             chat_mdl = LLMBundle(current_user.id, LLMType.CHAT, llm_name=search_config.get("chat_id", ""))
-            filters = gen_meta_filter(chat_mdl, metas, question)
-            doc_ids.extend(meta_filter(metas, filters))
-            if not doc_ids:
-                doc_ids = None
-        elif meta_data_filter.get("method") == "manual":
-            doc_ids.extend(meta_filter(metas, meta_data_filter["manual"]))
+            # Use apply_metadata_filter to support both regular and langextract metadata filtering
+            filtered_doc_ids = apply_metadata_filter(
+                metas=metas,
+                meta_data_filter=meta_data_filter,
+                query=question,
+                chat_mdl=chat_mdl,
+                initial_doc_ids=doc_ids if doc_ids else None,
+                kb_ids=kb_ids
+            )
+            doc_ids = filtered_doc_ids if filtered_doc_ids else []
             if not doc_ids:
                 doc_ids = None
 

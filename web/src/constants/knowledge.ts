@@ -89,4 +89,7 @@ export enum DocumentParserType {
   Email = 'email',
   Tag = 'tag',
   KnowledgeGraph = 'knowledge_graph',
+  Title = 'title', // PowerRAG Title Parser
+  Regex = 'regex', // PowerRAG Regex Parser
+  Smart = 'smart', // PowerRAG Smart Parser
 }

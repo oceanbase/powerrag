@@ -15,6 +15,7 @@
 #
 import asyncio
 import functools
+import inspect
 import json
 import logging
 import os
@@ -278,7 +279,10 @@ def apikey_required(func):
         objs = APIToken.query(token=token)
         if not objs:
             return build_error_result(message="API-KEY is invalid!", code=settings.RetCode.FORBIDDEN)
-        kwargs["tenant_id"] = objs[0].tenant_id
+        # Check if function expects tenant_id parameter and always inject it
+        sig = inspect.signature(func)
+        if "tenant_id" in sig.parameters:
+            kwargs["tenant_id"] = objs[0].tenant_id
         return func(*args, **kwargs)
 
     return decorated_function
@@ -433,6 +437,10 @@ def get_parser_config(chunk_method, parser_config):
         "laws": {"raptor": {"use_raptor": False}, "graphrag": {"use_graphrag": False}},
         "presentation": {"raptor": {"use_raptor": False}, "graphrag": {"use_graphrag": False}},
         "one": None,
+        "title": {
+            "raptor": {"use_raptor": False},
+            "graphrag": {"use_graphrag": False},
+        },
         "knowledge_graph": {
             "chunk_token_num": 8192,
             "delimiter": r"\n",
@@ -442,6 +450,14 @@ def get_parser_config(chunk_method, parser_config):
         },
         "email": None,
         "picture": None,
+        "smart": {
+            "raptor": {"use_raptor": False},
+            "graphrag": {"use_graphrag": False},
+        },
+        "regex": {
+            "raptor": {"use_raptor": False},
+            "graphrag": {"use_graphrag": False},
+        },
     }
 
     default_config = key_mapping[chunk_method]

@@ -224,6 +224,9 @@ export default {
       delimiter: `文本分段标识符`,
       delimiterTip:
         '支持多字符作为分隔符，多字符用两个反引号 \\`\\` 分隔符包裹。若配置成：\\n`##`; 系统将首先使用换行符、两个#号以及分号先对文本进行分割，随后再对分得的小文本块按照「建议文本块大小」设定的大小进行拼装。在设置文本分段标识符前请确保理解上述文本分段切片机制。',
+      regexPattern: '正则表达式模式',
+      regexPatternTip:
+        '用于初步分割文本单元的正则表达式模式。该模式定义了在分块之前如何将文本分割成单元。例如："[.!?]+\\s*" 匹配句子结尾。',
       html4excel: '表格转HTML',
       html4excelTip: `与 General 切片方法配合使用。未开启状态下，表格文件（XLSX、XLS（Excel 97-2003））会按行解析为键值对。开启后，表格文件会被解析为 HTML 表格。若原始表格超过 12 行，系统会自动按每 12 行拆分为多个 HTML 表格。欲了解更多详情，请参阅 https://ragflow.io/docs/dev/enable_excel2html。`,
       autoKeywords: '自动关键词提取',
@@ -290,6 +293,17 @@ export default {
       manualSetup: '选择pipeline',
       builtIn: '内置',
       titleDescription: '在这里更新您的知识库详细信息，尤其是切片方法。',
+      titleLevel: '标题级别',
+      titleLevelDescription:
+        '选择用于切分文档的最大标题级别（H1-H6）。更高级别包含所有更低级别。推荐：大多数文档使用 H1-H3。',
+      selectTitleLevel: '选择标题级别',
+      layoutRecognize: '布局识别方法',
+      layoutRecognizeDescription:
+        '选择解析 PDF 布局的方法。MinerU（PowerRAG）提供高质量的解析和标题检测。',
+      selectLayoutRecognize: '选择布局识别方法',
+      pdfParser: 'PDF解析器',
+      pdfParserTip: '选择用于解析PDF文档的解析器。仅对PDF文件有效。',
+      selectPdfParser: '选择PDF解析器',
       name: '知识库名称',
       photo: '知识库图片',
       photoTip: '你可以上传4MB的文件',
@@ -306,7 +320,10 @@ export default {
       permissionsTip:
         '如果把知识库权限设为“团队”，则所有团队成员都可以操作该知识库。',
       chunkTokenNumberTip:
-        '建议的生成文本块的 token 数阈值。如果切分得到的小文本段 token 数达不到这一阈值就会不断与之后的文本段合并，直至再合并下一个文本段会超过这一阈值为止，此时产生一个最终文本块。如果系统在切分文本段时始终没有遇到文本分段标识符，即便文本段 token 数已经超过这一阈值，系统也不会生成新文本块。',
+        '建议的生成文本块的 token 数阈值。如果切分得到的小文本段 token 数达不到这一阈值就会不断与之后的文本段合并，直至再合并下一个文本段会超过这一阈值为止，此时产生一个最终文本块。如果系统在切分文本段时始终没有遇到文本分段标识符,即便文本段 token 数已经超过这一阈值，系统也不会生成新文本块。',
+      minChunkTokens: '最小切片大小',
+      minChunkTokensDescription:
+        '最小可接受的切片token数。小于此阈值的切片会与相邻切片合并，以避免内容过于碎片化。必须小于或等于建议文本块大小。',
       chunkMethod: '切片方法',
       chunkMethodTip: '说明位于右侧。',
       upload: '上传',
@@ -324,6 +341,20 @@ export default {
         '为帮助您更好地理解，我们提供了相关截图供您参考。',
       dialogueExamplesTitle: '对话示例',
       methodEmpty: '这将显示知识库类别的可视化解释',
+      regex: `<p>支持的文件格式为<b>PDF</b>、<b>DOCX</b>、<b>MD</b>、<b>TXT</b>。</p>
+      <p>此方法使用 PowerRAG 的高级正则表达式切片：</p>
+      <p>
+      <li>使用自定义正则表达式分割文本，实现精确控制。</li>
+      <li>合并相邻段落直到达到 token 阈值。</li>
+      <li>最适合具有统一结构和清晰分隔符的文档。</li>
+      </p>`,
+      smart: `<p>支持的文件格式为<b>PDF</b>、<b>DOCX</b>、<b>MD</b>、<b>TXT</b>。</p>
+      <p>此方法使用 PowerRAG 的高级智能切片：</p>
+      <p>
+      <li>基于 AST 的 markdown 解析实现智能文本分割。</li>
+      <li>在切片过程中保留文档结构和上下文。</li>
+      <li>最适合具有嵌套结构的复杂文档。</li>
+      </p>`,
       book: `<p>支持的文件格式为<b>DOCX</b>、<b>PDF</b>、<b>TXT</b>。</p><p>
       由于一本书很长，并不是所有部分都有用，如果是 PDF，
       请为每本书设置<i>页面范围</i>，以消除负面影响并节省分析计算时间。</p>`,
@@ -376,7 +407,15 @@ export default {
       我们不是将简历分块，而是将简历解析为结构化数据。 作为HR，你可以扔掉所有的简历，
       您只需与<i>'RAGFlow'</i>交谈即可列出所有符合资格的候选人。
       </p>
-        `,
+      `,
+      title: `<p>支持的文件格式为<b>PDF</b>、<b>DOCX</b>、<b>MD</b>、<b>TXT</b>。</p>
+      <p>此方法使用 PowerRAG 的高级标题切片：</p>
+      <p>
+      <li>使用 MinerU 解析器检测文档结构，实现高质量标题识别。</li>
+      <li>按层次化标题（H1-H6）切分文本，同时保留上下文。</li>
+      <li>合并相邻段落直到达到 token 阈值。</li>
+      <li>最适合具有清晰章节层次结构的文档。</li>
+      </p>`,
       table: `支持<p><b>XLSX</b>和<b>CSV/TXT</b>格式文件。</p><p>
       以下是一些提示：
       <ul>
@@ -656,6 +695,9 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       metadata: '元数据',
       metadataTip:
         '元数据过滤是使用元数据属性（例如标签、类别或访问权限）来优化和控制系统内相关信息检索的过程。',
+      customLangchainExtractionConfig: '自定义 Langchain 提取配置',
+      customLangchainExtractionConfigTip:
+        '启用自定义 Langchain 提取配置。如果未启用，将使用知识库 pipeline 中的配置。',
       conditions: '条件',
       addCondition: '增加条件',
       meta: {
@@ -1528,6 +1570,26 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       extractor: '提取器',
       extractorDescription:
         '使用 LLM 从文档块（例如摘要、分类等）中提取结构化见解。',
+      // PowerRAG 组件
+      advancedPDFParser: 'PowerRAG - 高级PDF解析器',
+      advancedPDFParserDescription: '高级PDF解析，支持表格和图像提取。',
+      documentToPDF: 'PowerRAG - 文档转PDF',
+      documentToPDFDescription: '将各种文档格式转换为PDF，支持自定义设置。',
+      semanticSplitter: 'PowerRAG - 语义分割器',
+      semanticSplitterDescription: '基于语义相似度分割文本，更好地保留上下文。',
+      hierarchicalSplitter: 'PowerRAG - 层次分割器',
+      hierarchicalSplitterDescription: '按文档层次结构和标题分割文档。',
+      regexBasedSplitter: 'PowerRAG - 正则表达式分割器',
+      regexBasedSplitterDescription:
+        '使用自定义正则表达式分割文本，实现精确控制。',
+      smartBasedSplitter: 'PowerRAG - 智能分割器',
+      smartBasedSplitterDescription: '基于AST的markdown解析实现智能文本分割。',
+      entityExtractor: 'PowerRAG - 实体提取器',
+      entityExtractorDescription: '提取命名实体，如人名、组织和地点。',
+      keywordExtractor: 'PowerRAG - 关键词提取器',
+      keywordExtractorDescription: '从文本中提取重要的关键词和短语。',
+      summaryExtractor: 'PowerRAG - 摘要提取器',
+      summaryExtractorDescription: '使用LLM或抽取式方法生成文档块的摘要。',
       outputFormat: '输出格式',
       fileFormats: '文件格式',
       fields: '字段',
@@ -1720,6 +1782,37 @@ Tokenizer 会根据所选方式将内容存储为对应的数据结构。`,
       downloadFailedTip: '下载失败总数',
       processingSuccessTip: '处理成功的文件总数',
       processingFailedTip: '处理失败的文件总数',
+    },
+    powerrag: {
+      smartBasedSplitter: {
+        chunkTokenNum: '建议文本块大小（tokens）',
+        chunkTokenNumTooltip:
+          '建议的生成文本块的token数。切片器会在尊重文档结构和边界的前提下，尽量生成接近此大小的文本块。',
+        minChunkTokens: '最小切片大小（tokens）',
+        minChunkTokensTooltip:
+          '最小可接受的切片token数。小于此阈值的切片会与相邻切片合并，以避免内容过于碎片化。必须小于或等于建议文本块大小。',
+      },
+      regexBasedSplitter: {
+        pattern: '分隔符模式（正则表达式）',
+        patternTooltip:
+          '用于分割文本的正则表达式模式。默认：[.!?]+\\s*（在句子结尾处分割）',
+        chunkTokenNum: '建议文本块大小（tokens）',
+        chunkTokenNumTooltip:
+          '建议的生成文本块的token数。切片器会将相邻的文本段合并，直到达到此大小。',
+        minChunkTokens: '最小切片大小（tokens）',
+        minChunkTokensTooltip:
+          '最小可接受的切片token数。小于此阈值的切片会与相邻切片合并，以避免内容过于碎片化。必须小于或等于建议文本块大小。',
+      },
+      titleBasedSplitter: {
+        titleLevel: '标题级别',
+        titleLevelTooltip:
+          '用于分割的最大标题级别（1-6）。数字越大，包含的标题级别越多。',
+        chunkTokenNum: '建议文本块大小（tokens）',
+        chunkTokenNumTooltip:
+          '建议的生成文本块的token数。过大的章节会使用分隔符进一步分割。',
+        delimiter: '分隔符字符',
+        delimiterTooltip: '用于分割大章节的字符。默认：\\n!?;。；！？',
+      },
     },
   },
 };

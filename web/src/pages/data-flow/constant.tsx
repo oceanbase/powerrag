@@ -235,9 +235,70 @@ export const initialHierarchicalMergerValues = {
 export const initialExtractorValues = {
   ...initialLlmBaseValues,
   field_name: ContextGeneratorFieldName.Summary,
+  extraction_type: 'simple', // 'simple' or 'langextract'
+  prompt_description: '', // Required for langextract
+  examples: [], // List of example dicts for langextract
   outputs: {
     chunks: { type: 'Array<Object>', value: [] },
   },
+};
+
+// PowerRAG Component Initial Values
+export const initialPowerRAGPDFParserValues = {
+  formula_enable: true,
+  enable_ocr: false,
+  from_page: 0,
+  to_page: 100000,
+  output_format: 'markdown',
+};
+
+export const initialPowerRAGDocumentToPDFValues = {
+  supported_extensions: [
+    'docx',
+    'doc',
+    'xlsx',
+    'xls',
+    'pptx',
+    'ppt',
+    'html',
+    'htm',
+  ],
+  format_type: 'office',
+};
+
+export const initialPowerRAGTitleBasedSplitterValues = {
+  title_level: 3,
+  chunk_token_num: 256,
+  delimiter: '\n!?;。；！？',
+  layout_recognize: 'mineru',
+};
+
+export const initialPowerRAGRegexBasedSplitterValues = {
+  pattern: '[.!?]+s*',
+  chunk_token_num: 256,
+  min_chunk_tokens: 64,
+};
+
+export const initialPowerRAGSmartBasedSplitterValues = {
+  chunk_token_num: 256,
+  min_chunk_tokens: 64,
+};
+
+export const initialPowerRAGEntityExtractorValues = {
+  entity_types: [
+    'PERSON',
+    'ORG',
+    'GPE',
+    'MONEY',
+    'DATE',
+    'TIME',
+    'EMAIL',
+    'PHONE',
+  ],
+  use_regex: true,
+  use_llm: false,
+  min_length: 2,
+  max_length: 50,
 };
 
 export const CategorizeAnchorPointPositions = [
@@ -265,6 +326,13 @@ export const RestrictedUpstreamMap: Record<Operator, Operator[]> = {
   [Operator.Tokenizer]: [Operator.Begin],
   [Operator.Extractor]: [Operator.Begin],
   [Operator.Note]: [Operator.Begin],
+  // PowerRAG Components
+  [Operator.PowerRAGPDFParser]: [Operator.Begin],
+  [Operator.PowerRAGDocumentToPDF]: [Operator.Begin],
+  [Operator.PowerRAGTitleBasedSplitter]: [Operator.Begin],
+  [Operator.PowerRAGRegexBasedSplitter]: [Operator.Begin],
+  [Operator.PowerRAGSmartBasedSplitter]: [Operator.Begin],
+  [Operator.PowerRAGEntityExtractor]: [Operator.Begin],
 };
 
 export const NodeMap = {
@@ -275,6 +343,13 @@ export const NodeMap = {
   [Operator.Splitter]: 'splitterNode',
   [Operator.HierarchicalMerger]: 'splitterNode',
   [Operator.Extractor]: 'contextNode',
+  // PowerRAG Components
+  [Operator.PowerRAGPDFParser]: 'powerragParserNode',
+  [Operator.PowerRAGDocumentToPDF]: 'powerragParserNode',
+  [Operator.PowerRAGTitleBasedSplitter]: 'powerragSplitterNode',
+  [Operator.PowerRAGRegexBasedSplitter]: 'powerragSplitterNode',
+  [Operator.PowerRAGSmartBasedSplitter]: 'powerragSplitterNode',
+  [Operator.PowerRAGEntityExtractor]: 'powerragExtractorNode',
 };
 
 export const NoDebugOperatorsList = [Operator.Begin];
@@ -321,4 +396,11 @@ export const SingleOperators = [
   Operator.Splitter,
   Operator.HierarchicalMerger,
   Operator.Parser,
+  // PowerRAG Components
+  Operator.PowerRAGPDFParser,
+  Operator.PowerRAGDocumentToPDF,
+  Operator.PowerRAGTitleBasedSplitter,
+  Operator.PowerRAGRegexBasedSplitter,
+  Operator.PowerRAGSmartBasedSplitter,
+  Operator.PowerRAGEntityExtractor,
 ];

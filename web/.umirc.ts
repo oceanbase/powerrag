@@ -16,7 +16,7 @@ export default defineConfig({
   esbuildMinifyIIFE: true,
   icons: {},
   hash: true,
-  favicons: ['/logo.svg'],
+  favicons: ['/logo/powerrag_logo.svg'],
   headScripts: [{ src: '/iconfont.js', defer: true }],
   clickToComponent: {},
   history: {
@@ -40,7 +40,7 @@ export default defineConfig({
   proxy: [
     {
       context: ['/api', '/v1'],
-      target: 'http://127.0.0.1:9380/',
+      target: 'http://127.0.0.1:9380',
       changeOrigin: true,
       ws: true,
       logger: console,

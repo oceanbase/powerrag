@@ -58,12 +58,52 @@ export function SavingButton() {
       onClick={() => {
         (async () => {
           try {
-            let beValid = await form.formControl.trigger();
+            let beValid = await form.trigger();
             if (beValid) {
               form.handleSubmit(async (values) => {
-                console.log('saveKnowledgeConfiguration: ', values);
+                console.log(
+                  'saveKnowledgeConfiguration before cleanup: ',
+                  values,
+                );
                 delete values['parseType'];
                 // delete values['avatar'];
+
+                if (values.parser_config) {
+                  // Remove pdf_parser field - PDF parser is stored in layout_recognize
+                  delete values.parser_config.pdf_parser;
+
+                  // Handle Title parser
+                  if (values.parser_id === 'title') {
+                    // Ensure title_level is included - get it from form if not in values
+                    if (!values.parser_config.title_level) {
+                      const titleLevel = form.getValues(
+                        'parser_config.title_level',
+                      );
+                      if (titleLevel) {
+                        values.parser_config.title_level = titleLevel;
+                      }
+                    }
+                    console.log(
+                      'Title parser config after cleanup:',
+                      values.parser_config,
+                    );
+                    console.log(
+                      'title_level:',
+                      values.parser_config.title_level,
+                    );
+                  }
+
+                  // Handle Regex parser - remove pdf_parser and title_level
+                  if (values.parser_id === 'regex') {
+                    delete values.parser_config.title_level;
+                    console.log(
+                      'Regex parser config after cleanup:',
+                      values.parser_config,
+                    );
+                  }
+                }
+
+                console.log('Final save data:', values);
                 await saveKnowledgeConfiguration({
                   kb_id,
                   ...values,

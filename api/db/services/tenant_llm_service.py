@@ -63,6 +63,18 @@ class TenantLLMService(CommonService):
             cls.model.tenant_id == tenant_id, ~cls.model.api_key.is_null()).dicts()
 
         return list(objs)
+    
+    @staticmethod
+    def  get_pure_model_name(factory_name, model_name):
+        if factory_name == "LocalAI":
+            model_name = model_name.replace("___LocalAI", "")
+        elif factory_name == "HuggingFace":
+            model_name = model_name.replace("___HuggingFace", "")
+        elif factory_name == "OpenAI-API-Compatible":
+            model_name = model_name.replace("___OpenAI-API", "")
+        elif factory_name == "VLLM":
+            model_name = model_name.replace("___VLLM", "")
+        return model_name
 
     @staticmethod
     def split_model_name_and_factory(model_name):

@@ -154,7 +154,14 @@ const SearchSetting: React.FC<SearchSettingProps> = ({
         keyword: false,
         related_search: search_config?.related_search || false,
         query_mindmap: search_config?.query_mindmap || false,
-        meta_data_filter: search_config?.meta_data_filter,
+        meta_data_filter: search_config?.meta_data_filter || {
+          method: 'disabled',
+          manual: [],
+          langextract_config: {
+            prompt_description: '',
+            examples: [],
+          },
+        },
       },
     });
   }, [data, search_config, llm_setting, formMethods, descriptionDefaultValue]);

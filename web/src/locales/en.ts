@@ -239,6 +239,9 @@ export default {
       delimiter: `Delimiter for text`,
       delimiterTip:
         'A delimiter or separator can consist of one or multiple special characters. If it is multiple characters, ensure they are enclosed in backticks( ``). For example, if you configure your delimiters like this: \\n`##`;, then your texts will be separated at line breaks, double hash symbols (##), and semicolons.',
+      regexPattern: 'Regular Expression Pattern',
+      regexPatternTip:
+        'Regular expression pattern used for initial text segmentation. This pattern defines how text is split into units before chunking. Example: "[.!?]+\\s*" matches sentence endings.',
       html4excel: 'Excel to HTML',
       html4excelTip: `Use with the General chunking method. When disabled, spreadsheets (XLSX or XLS(Excel 97-2003)) in the knowledge base will be parsed into key-value pairs. When enabled, they will be parsed into HTML tables, splitting every 12 rows if the original table has more than 12 rows. See https://ragflow.io/docs/dev/enable_excel2html for details.`,
       autoKeywords: 'Auto-keyword',
@@ -306,6 +309,18 @@ export default {
       builtIn: 'Built-in',
       titleDescription:
         'Update your knowledge base configuration here, particularly the chunking method.',
+      titleLevel: 'Title Level',
+      titleLevelDescription:
+        'Select the maximum heading level (H1-H6) to use for splitting documents. Higher levels include all lower levels. Recommended: H1-H3 for most documents.',
+      selectTitleLevel: 'Select title level',
+      layoutRecognize: 'Layout Recognize Method',
+      layoutRecognizeDescription:
+        'Choose the method for parsing PDF layout. MinerU (PowerRAG) provides high-quality parsing with title detection.',
+      selectLayoutRecognize: 'Select layout recognize method',
+      pdfParser: 'PDF Parser',
+      pdfParserTip:
+        'Select the parser to use for parsing PDF documents. Only applies to PDF files.',
+      selectPdfParser: 'Select PDF parser',
       name: 'Knowledge base name',
       photo: 'Knowledge base photo',
       photoTip: 'You can upload a file with 4 MB',
@@ -323,6 +338,9 @@ export default {
         "If it is set to 'Team', all your team members will be able to manage the knowledge base.",
       chunkTokenNumberTip:
         'It kind of sets the token threshold for a creating a chunk. A segment with fewer tokens than this threshold will be combined with the following segments until the token count exceeds the threshold, at which point a chunk is created. No new chunk is created unless a delimiter is encountered, even if the threshold is exceeded.',
+      minChunkTokens: 'Minimum Chunk Size',
+      minChunkTokensDescription:
+        'Minimum acceptable chunk size in tokens. Chunks smaller than this threshold will be merged with adjacent chunks to avoid fragmented content. Must be less than or equal to the recommended chunk size.',
       chunkMethod: 'Chunking method',
       chunkMethodTip: 'View the tips on the right.',
       upload: 'Upload',
@@ -342,6 +360,20 @@ export default {
       dialogueExamplesTitle: 'view',
       methodEmpty:
         'This will display a visual explanation of the knowledge base categories',
+      regex: `<p>Supported file formats are <b>PDF</b>, <b>DOCX</b>, <b>MD</b>, <b>TXT</b>.</p>
+      <p>This method uses PowerRAG's advanced regex-based chunking:</p>
+      <p>
+      <li>Splits text using custom regular expressions for precise control.</li>
+      <li>Combines adjacent segments until token threshold is reached.</li>
+      <li>Best for documents with consistent structure and clear delimiters.</li>
+      </p>`,
+      smart: `<p>Supported file formats are <b>PDF</b>, <b>DOCX</b>, <b>MD</b>, <b>TXT</b>.</p>
+      <p>This method uses PowerRAG's advanced smart-based chunking:</p>
+      <p>
+      <li>Intelligent text splitting using AST-based markdown parsing.</li>
+      <li>Preserves document structure and context during chunking.</li>
+      <li>Best for complex documents with nested structures.</li>
+      </p>`,
       book: `<p>Supported file formats are <b>DOCX</b>, <b>PDF</b>, <b>TXT</b>.</p><p>
       For each book in PDF, please set the <i>page ranges</i> to remove unwanted information and reduce analysis time.</p>`,
       laws: `<p>Supported file formats are <b>DOCX</b>, <b>PDF</b>, <b>TXT</b>.</p><p>
@@ -387,6 +419,14 @@ export default {
       Résumés of various forms are parsed and organized into structured data to facilitate candidate search for recruiters.
       </p>
       `,
+      title: `<p>Supported file formats are <b>PDF</b>, <b>DOCX</b>, <b>MD</b>, <b>TXT</b>.</p>
+      <p>This method uses PowerRAG's advanced title-based chunking:</p>
+      <p>
+      <li>Detects document structure using MinerU parser for high-quality title recognition.</li>
+      <li>Splits text by hierarchical titles (H1-H6) while preserving context.</li>
+      <li>Combines adjacent segments until token threshold is reached.</li>
+      <li>Best for structured documents with clear section hierarchies.</li>
+      </p>`,
       table: `<p>Supported file formats are <b>XLSX</b> and <b>CSV/TXT</b>.</p><p>
       Here are some prerequisites and tips:
       <ul>
@@ -667,6 +707,9 @@ This auto-tagging feature enhances retrieval by adding another layer of domain-s
       metadata: 'Meta Data',
       metadataTip:
         'Metadata filtering is the process of using metadata attributes (such as tags, categories, or access permissions) to refine and control the retrieval of relevant information within a system.',
+      customLangchainExtractionConfig: 'Custom Langchain Extraction Config',
+      customLangchainExtractionConfigTip:
+        'Enable custom langchain extraction configuration. If disabled, the configuration from the knowledge base pipeline will be used.',
       conditions: 'Conditions',
       addCondition: 'Add Condition',
       meta: {
@@ -1622,6 +1665,34 @@ This delimiter is used to split the input text into several text pieces echo of 
       extractor: 'Transformer',
       extractorDescription:
         'Use an LLM to extract structured insights from document chunks—such as summaries, classifications, etc.',
+      // PowerRAG Components
+      advancedPDFParser: 'PowerRAG - Advanced PDF Parser',
+      advancedPDFParserDescription:
+        'Advanced PDF parsing with table and image extraction support.',
+      documentToPDF: 'PowerRAG - Document to PDF',
+      documentToPDFDescription:
+        'Convert various document formats to PDF with customizable settings.',
+      semanticSplitter: 'PowerRAG - Semantic Splitter',
+      semanticSplitterDescription:
+        'Split text based on semantic similarity for better context preservation.',
+      hierarchicalSplitter: 'PowerRAG - Hierarchical Splitter',
+      hierarchicalSplitterDescription:
+        'Split documents by hierarchical structure and headers.',
+      regexBasedSplitter: 'PowerRAG - Regex Based Splitter',
+      regexBasedSplitterDescription:
+        'Split text using custom regular expressions for precise control.',
+      smartBasedSplitter: 'PowerRAG - Smart Based Splitter',
+      smartBasedSplitterDescription:
+        'Intelligent text splitting using AST-based markdown parsing.',
+      entityExtractor: 'PowerRAG - Entity Extractor',
+      entityExtractorDescription:
+        'Extract named entities like persons, organizations, and locations.',
+      keywordExtractor: 'PowerRAG - Keyword Extractor',
+      keywordExtractorDescription:
+        'Extract important keywords and phrases from text.',
+      summaryExtractor: 'PowerRAG - Summary Extractor',
+      summaryExtractorDescription:
+        'Generate summaries of document chunks using LLM or extractive methods.',
       outputFormat: 'Output format',
       fileFormats: 'File format',
       fileFormatOptions: {
@@ -1833,6 +1904,38 @@ Important structured information may include: names, dates, locations, events, k
       processingSuccessTip: 'Total successfully processed files',
       processingFailedTip: 'Total failed processes',
       processing: 'Processing',
+    },
+    powerrag: {
+      smartBasedSplitter: {
+        chunkTokenNum: 'Target Chunk Size (tokens)',
+        chunkTokenNumTooltip:
+          'Target size for each chunk in tokens. The chunker will try to create chunks close to this size while respecting document structure and boundaries.',
+        minChunkTokens: 'Minimum Chunk Size (tokens)',
+        minChunkTokensTooltip:
+          'Minimum acceptable chunk size in tokens. Chunks smaller than this threshold will be merged with adjacent chunks to avoid fragmented content. Must be less than or equal to the target chunk size.',
+      },
+      regexBasedSplitter: {
+        pattern: 'Delimiter Pattern (Regex)',
+        patternTooltip:
+          'Regular expression pattern to split text. Default: [.!?]+\\s* (splits on sentence endings)',
+        chunkTokenNum: 'Target Chunk Size (tokens)',
+        chunkTokenNumTooltip:
+          'Target size for each chunk in tokens. The chunker will combine adjacent segments until reaching this size.',
+        minChunkTokens: 'Minimum Chunk Size (tokens)',
+        minChunkTokensTooltip:
+          'Minimum acceptable chunk size in tokens. Chunks smaller than this threshold will be merged with adjacent chunks to avoid fragmented content.',
+      },
+      titleBasedSplitter: {
+        titleLevel: 'Title Level',
+        titleLevelTooltip:
+          'Maximum heading level (1-6) to use for splitting. Higher numbers include more heading levels.',
+        chunkTokenNum: 'Target Chunk Size (tokens)',
+        chunkTokenNumTooltip:
+          'Target size for each chunk in tokens. Large sections will be split further using delimiters.',
+        delimiter: 'Delimiter Characters',
+        delimiterTooltip:
+          'Characters used to split large sections. Default: \\n!?;。；！？',
+      },
     },
   },
 };

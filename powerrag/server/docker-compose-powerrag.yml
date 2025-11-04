@@ -1,0 +1,107 @@
+version: '3.8'
+
+services:
+  # Gotenberg service for document conversion
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: powerrag-gotenberg
+    ports:
+      - "3000:3000"
+    environment:
+      - CHROMIUM_DISABLE_SANDBOX=true
+      - LIBREOFFICE_DISABLE_SANDBOX=true
+      - API_TIMEOUT=60s
+      - LOG_LEVEL=info
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - powerrag-network
+
+  # MinerU vLLM Server for model inference
+  mineru-vllm-server:
+    image: mineru-vllm:latest
+    container_name: mineru-vllm-server
+    restart: always
+    profiles: ["vllm-server"]
+    ports:
+      - "30000:30000"
+    environment:
+      - MINERU_MODEL_SOURCE=local
+    entrypoint: mineru-vllm-server
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "30000"
+      # - --data-parallel-size
+      # - "2"  # If using multiple GPUs, increase throughput using vllm's multi-GPU parallel mode
+      # - --gpu-memory-utilization
+      # - "0.5"  # If running on a single GPU and encountering VRAM shortage, reduce the KV cache size
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    ipc: host
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:30000/health || exit 1"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    networks:
+      - powerrag-network
+
+  # MinerU API Service
+  mineru-api:
+    image: mineru-vllm:latest
+    container_name: mineru-api
+    restart: always
+    profiles: ["api"]
+    ports:
+      - "8000:8000"
+    environment:
+      - MINERU_MODEL_SOURCE=local
+    entrypoint: mineru-api
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      # - --data-parallel-size
+      # - "2"  # If using multiple GPUs, increase throughput using vllm's multi-GPU parallel mode
+      # - --gpu-memory-utilization
+      # - "0.5"  # If running on a single GPU and encountering VRAM shortage, reduce the KV cache size
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    networks:
+      - powerrag-network
+      
+networks:
+  powerrag-network:
+    driver: bridge
+
+

@@ -9,7 +9,7 @@ mysql:
   user: '${MYSQL_USER:-root}'
   password: '${MYSQL_PASSWORD:-infini_rag_flow}'
   host: '${MYSQL_HOST:-mysql}'
-  port: 3306
+  port: ${MYSQL_PORT:-3306}
   max_connections: 900
   stale_timeout: 300
   max_allowed_packet: ${MYSQL_MAX_PACKET:-1073741824}
@@ -32,6 +32,20 @@ redis:
   db: 1
   password: '${REDIS_PASSWORD:-infini_rag_flow}'
   host: '${REDIS_HOST:-redis}:6379'
+oceanbase:
+  scheme: 'mysql' # set 'mysql' to create connection using mysql config
+  config:
+    db_name: '${OCEANBASE_DOC_DBNAME:-test}'
+gotenberg:
+  url: '${GOTENBERG_URL}'
+  timeout: 60
+mineru:
+  hosts: '${MINERU_URL}'  # MinerU API service URL (启动 docker-compose mineru-api 服务后使用)
+  backend: '${MINERU_BACKEND}'  # 或 'vlm-http-client' 如果使用 vllm-server
+  server_url: '${MINERU_VLM_URL}'  # 仅当 backend 为 vlm-http-client 时需要
+  # 如果不配置此项，将自动降级到本地 mineru CLI（需要通过 pip install -U 'mineru[core]' 安装）
+dots_ocr:
+  vllm_url: '${DOTS_OCR_URL}'  # Dots OCR vLLM service URL
 # postgres:
 #   name: '${POSTGRES_DBNAME:-rag_flow}'
 #   user: '${POSTGRES_USER:-rag_flow}'

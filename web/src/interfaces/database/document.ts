@@ -33,6 +33,7 @@ export interface IDocumentInfo {
 
 export interface IParserConfig {
   delimiter?: string;
+  regex_pattern?: string;
   html4excel?: boolean;
   layout_recognize?: boolean;
   pages: any[];

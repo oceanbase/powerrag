@@ -15,6 +15,8 @@ const ParserListMap = new Map([
       'one',
       'qa',
       'knowledge_graph',
+      'smart',
+      'regex',
     ],
   ],
   [
@@ -28,6 +30,8 @@ const ParserListMap = new Map([
       'qa',
       'manual',
       'knowledge_graph',
+      'smart',
+      'regex',
     ],
   ],
   [
@@ -50,6 +54,7 @@ const ParserListMap = new Map([
       'qa',
       'table',
       'knowledge_graph',
+      'regex',
     ],
   ],
   [
@@ -65,7 +70,7 @@ const ParserListMap = new Map([
       'knowledge_graph',
     ],
   ],
-  [['md'], ['naive', 'qa', 'knowledge_graph']],
+  [['md'], ['naive', 'qa', 'knowledge_graph', 'smart', 'regex']],
   [['json'], ['naive', 'knowledge_graph']],
   [['eml'], ['email']],
 ]);

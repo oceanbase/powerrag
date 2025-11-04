@@ -20,6 +20,7 @@ import random
 import sys
 import threading
 import time
+from typing import List
 
 import json_repair
 
@@ -60,11 +61,14 @@ from api.versions import get_ragflow_version
 from api.db.db_models import close_connection
 from rag.app import laws, paper, presentation, manual, qa, table, book, resume, picture, naive, one, audio, \
     email, tag
+from powerrag.app import title as powerrag_title
+from powerrag.app import regex as powerrag_regex
+from powerrag.app import smart as powerrag_smart
 from rag.nlp import search, rag_tokenizer, add_positions
 from rag.raptor import RecursiveAbstractiveProcessing4TreeOrganizedRetrieval as Raptor
 from rag.settings import DOC_MAXIMUM_SIZE, DOC_BULK_SIZE, EMBEDDING_BATCH_SIZE, SVR_CONSUMER_GROUP_NAME, get_svr_queue_name, get_svr_queue_names, print_rag_settings, TAG_FLD, PAGERANK_FLD
 from rag.utils import num_tokens_from_string, truncate
-from rag.utils.redis_conn import REDIS_CONN, RedisDistributedLock
+from rag.utils.redis_conn import REDIS_CONN, distributed_lock
 from rag.utils.storage_factory import STORAGE_IMPL
 from graphrag.utils import chat_limiter
 
@@ -86,6 +90,9 @@ FACTORY = {
     ParserType.AUDIO.value: audio,
     ParserType.EMAIL.value: email,
     ParserType.KG.value: naive,
+    ParserType.TITLE.value: powerrag_title,  # PowerRAG Title Parser
+    ParserType.REGEX.value: powerrag_regex,  # PowerRAG Regex Parser
+    ParserType.SMART.value: powerrag_smart,  # PowerRAG Smart Parser
     ParserType.TAG.value: tag
 }
 
@@ -585,6 +592,51 @@ async def run_dataflow(task: dict):
 
 
     metadata = {}
+
+    def merge_langextract_metadata(meta_list)->List[dict]:
+        """
+        Merge langextract metadata list.
+        
+        Args:
+            meta_list: List of metadata dicts
+        """
+        result_map={}
+        for meta in meta_list:
+            if not ("extraction_class" in meta and "extraction_text" in meta):
+                continue
+            key = f"{meta['extraction_class']}_{meta['extraction_text']}"
+            item = {}
+            if key in result_map:
+                item = result_map[key]
+            for k, v in meta.items():
+                item[k] = v
+            result_map[key] = item
+        return list(result_map.values())
+    
+    def update_langextract_metadata(langextract_data):
+        """
+        Update metadata with langextract format data.
+        
+        Args:
+            langextract_data: List of extraction dicts from current chunk
+        """
+        nonlocal metadata
+        
+        add_meta_list = []
+        for ext in langextract_data:
+            if "extraction_class" in ext and "extraction_text" in ext:
+                item = {"extraction_class": ext["extraction_class"], "extraction_text": ext["extraction_text"]}
+                if "attributes" in ext and ext["attributes"]:
+                    for key, value in ext["attributes"].items():
+                        item[f"attributes_{key}"] = value
+                add_meta_list.append(item)
+            else:
+                logging.error(f"Langextract data format error: {ext}")
+                continue
+        
+        existing_list = metadata["langextract"] if "langextract" in metadata and isinstance(metadata["langextract"], list) else []
+        metadata["langextract"] = merge_langextract_metadata(existing_list + add_meta_list)
+    
     def dict_update(meta):
         nonlocal metadata
         if not meta:
@@ -597,7 +649,16 @@ async def run_dataflow(task: dict):
                 return
         if not isinstance(meta, dict):
             return
+        
+        # Handle langextract format
+        if "langextract" in meta and isinstance(meta["langextract"], list):
+            update_langextract_metadata(meta["langextract"])
+            return
+        
+        # Handle regular metadata (non-langextract)
         for k, v in meta.items():
+            if k == "langextract":
+                continue  # Already handled above
             if isinstance(v, list):
                 v = [vv for vv in v if isinstance(vv, str)]
                 if not v:
@@ -997,7 +1058,7 @@ async def handle_task():
 async def report_status():
     global CONSUMER_NAME, BOOT_AT, PENDING_TASKS, LAG_TASKS, DONE_TASKS, FAILED_TASKS
     REDIS_CONN.sadd("TASKEXE", CONSUMER_NAME)
-    redis_lock = RedisDistributedLock("clean_task_executor", lock_value=CONSUMER_NAME, timeout=60)
+    redis_lock = distributed_lock("clean_task_executor", lock_value=CONSUMER_NAME, timeout=60)
     while True:
         try:
             now = datetime.now()

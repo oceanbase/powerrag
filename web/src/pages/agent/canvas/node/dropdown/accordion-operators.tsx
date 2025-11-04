@@ -146,6 +146,11 @@ export function PipelineAccordionOperators({
       ...restrictSingleOperatorOnCanvas([Operator.Parser, Operator.Tokenizer]),
     ];
     list.push(Operator.Extractor);
+
+    // PowerRAG Parser Components
+    list.push(Operator.PowerRAGDocumentToPDF);
+    list.push(Operator.PowerRAGEntityExtractor);
+
     return list;
   }, [restrictSingleOperatorOnCanvas]);
 
@@ -154,6 +159,8 @@ export function PipelineAccordionOperators({
       ...restrictSingleOperatorOnCanvas([
         Operator.Splitter,
         Operator.HierarchicalMerger,
+        // PowerRAG Components
+        Operator.PowerRAGTitleBasedSplitter,
       ]),
     ];
   }, [restrictSingleOperatorOnCanvas]);

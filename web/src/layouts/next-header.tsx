@@ -109,7 +109,7 @@ export function Header() {
     <section className="py-5 px-10 flex justify-between items-center ">
       <div className="flex items-center gap-4">
         <img
-          src={'/logo.svg'}
+          src={'/logo/powerrag_logo.svg'}
           alt="logo"
           className="size-10 mr-[12] cursor-pointer"
           onClick={handleLogoClick}

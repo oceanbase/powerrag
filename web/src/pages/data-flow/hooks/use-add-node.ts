@@ -13,6 +13,10 @@ import {
   initialHierarchicalMergerValues,
   initialNoteValues,
   initialParserValues,
+  initialPowerRAGDocumentToPDFValues,
+  initialPowerRAGEntityExtractorValues,
+  initialPowerRAGPDFParserValues,
+  initialPowerRAGTitleBasedSplitterValues,
   initialSplitterValues,
   initialTokenizerValues,
 } from '../constant';
@@ -40,6 +44,12 @@ export const useInitializeOperatorParams = () => {
         sys_prompt: t('dataflow.prompts.system.summary'),
         prompts: t('dataflow.prompts.user.summary'),
       },
+      // PowerRAG Components
+      [Operator.PowerRAGPDFParser]: initialPowerRAGPDFParserValues,
+      [Operator.PowerRAGDocumentToPDF]: initialPowerRAGDocumentToPDFValues,
+      [Operator.PowerRAGTitleBasedSplitter]:
+        initialPowerRAGTitleBasedSplitterValues,
+      [Operator.PowerRAGEntityExtractor]: initialPowerRAGEntityExtractorValues,
     };
   }, [llmId, t]);
 

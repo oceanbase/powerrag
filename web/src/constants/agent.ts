@@ -65,6 +65,13 @@ export enum DataflowOperator {
   Splitter = 'Splitter',
   HierarchicalMerger = 'HierarchicalMerger',
   Extractor = 'Extractor',
+  // PowerRAG Components
+  PowerRAGPDFParser = 'PDFParser',
+  PowerRAGDocumentToPDF = 'DocumentToPDF',
+  PowerRAGTitleBasedSplitter = 'TitleBasedSplitter',
+  PowerRAGRegexBasedSplitter = 'RegexBasedSplitter',
+  PowerRAGSmartBasedSplitter = 'SmartBasedSplitter',
+  PowerRAGEntityExtractor = 'EntityExtractor',
 }
 
 export enum Operator {
@@ -117,4 +124,11 @@ export enum Operator {
   HierarchicalMerger = 'HierarchicalMerger',
   Extractor = 'Extractor',
   Generate = 'Generate',
+  // PowerRAG Components
+  PowerRAGPDFParser = 'PDFParser',
+  PowerRAGDocumentToPDF = 'DocumentToPDF',
+  PowerRAGTitleBasedSplitter = 'TitleBasedSplitter',
+  PowerRAGRegexBasedSplitter = 'RegexBasedSplitter',
+  PowerRAGSmartBasedSplitter = 'SmartBasedSplitter',
+  PowerRAGEntityExtractor = 'EntityExtractor',
 }

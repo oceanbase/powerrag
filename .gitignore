@@ -195,3 +195,8 @@ ragflow_cli.egg-info
 
 # Default backup dir
 backup
+conf/local.service_conf.yaml
+docker/.env
+docker/launch_backend_service.sh
+docker/.env.oceanbase
+local.service_conf.yaml

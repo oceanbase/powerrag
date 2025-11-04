@@ -55,6 +55,7 @@ export default function DatasetSettings() {
       parser_config: {
         layout_recognize: DocumentType.DeepDOC,
         chunk_token_num: 512,
+        min_chunk_tokens: 64,
         delimiter: `\n`,
         auto_keywords: 0,
         auto_questions: 0,
@@ -86,6 +87,8 @@ export default function DatasetSettings() {
     useState<IGenerateLogButtonProps>();
   const [raptorGenerateData, setRaptorGenerateData] =
     useState<IGenerateLogButtonProps>();
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [previousParserId, setPreviousParserId] = useState<string>('');
 
   useEffect(() => {
     console.log('🚀 ~ DatasetSettings ~ knowledgeDetails:', knowledgeDetails);
@@ -107,6 +110,10 @@ export default function DatasetSettings() {
       } as IGenerateLogButtonProps);
       form.setValue('parseType', knowledgeDetails.pipeline_id ? 2 : 1);
       form.setValue('pipeline_id', knowledgeDetails.pipeline_id || '');
+      // Set previousParserId BEFORE isDataLoaded to ensure correct order
+      setPreviousParserId(knowledgeDetails.parser_id || '');
+      setIsDataLoaded(true);
+      console.log('📌 Set previousParserId to:', knowledgeDetails.parser_id);
     }
   }, [knowledgeDetails, form]);
 
@@ -158,6 +165,103 @@ export default function DatasetSettings() {
     }
     console.log('parseType', parseType);
   }, [parseType, form]);
+
+  // Set default values when Title or Regex parser is selected (only when switching from another parser)
+  useEffect(() => {
+    if (!isDataLoaded) {
+      return;
+    }
+
+    if (selectedTag === DocumentParserType.Title) {
+      // Only set defaults when switching TO Title parser from another parser
+      // This preserves saved values when loading existing Title configuration
+      // IMPORTANT: Only set defaults if we're switching FROM a different parser
+      // If previousParserId is empty or same as current, it means we're loading existing config
+      if (
+        previousParserId &&
+        previousParserId !== '' &&
+        previousParserId !== DocumentParserType.Title
+      ) {
+        const currentLayoutRecognize = form.getValues(
+          'parser_config.layout_recognize',
+        );
+        const currentDelimiter = form.getValues('parser_config.delimiter');
+        const currentTitleLevel = form.getValues('parser_config.title_level');
+
+        console.log('🔄 Setting defaults for Title parser switch:', {
+          previousParserId,
+          currentLayoutRecognize,
+          currentDelimiter,
+          currentTitleLevel,
+        });
+
+        // Only set defaults if values are not already set
+        if (!currentLayoutRecognize) {
+          form.setValue('parser_config.layout_recognize', 'mineru');
+        }
+        if (!currentDelimiter) {
+          form.setValue('parser_config.delimiter', '\n');
+        }
+        // IMPORTANT: Don't override title_level if it already has a value (from backend)
+        if (currentTitleLevel === undefined || currentTitleLevel === null) {
+          form.setValue('parser_config.title_level', 3);
+        } else {
+          console.log('✅ Preserving existing title_level:', currentTitleLevel);
+        }
+      } else {
+        // Loading existing Title configuration - preserve all values
+        const currentTitleLevel = form.getValues('parser_config.title_level');
+        console.log(
+          '📋 Loading existing Title config, title_level:',
+          currentTitleLevel,
+        );
+      }
+
+      // Update previous parser ID
+      if (selectedTag !== previousParserId) {
+        setPreviousParserId(selectedTag);
+      }
+    } else if (selectedTag === DocumentParserType.Regex) {
+      // Set default regex_pattern and delimiter for Regex parser when switching from another parser
+      if (
+        previousParserId &&
+        previousParserId !== '' &&
+        previousParserId !== DocumentParserType.Regex
+      ) {
+        const currentRegexPattern = form.getValues(
+          'parser_config.regex_pattern',
+        );
+        const currentDelimiter = form.getValues('parser_config.delimiter');
+        // Set default regex_pattern if not already set
+        if (!currentRegexPattern) {
+          form.setValue('parser_config.regex_pattern', '[.!?]+\\s*');
+        }
+        // Set default delimiter for regex parser if not already set
+        if (!currentDelimiter || currentDelimiter === '\n') {
+          form.setValue('parser_config.delimiter', '\n。.；;！!？？');
+        }
+      }
+
+      // Update previous parser ID
+      if (selectedTag !== previousParserId) {
+        setPreviousParserId(selectedTag);
+      }
+    } else if (selectedTag && selectedTag !== previousParserId) {
+      // When switching from Regex to other parsers, clear regex_pattern and reset delimiter
+      if (previousParserId === DocumentParserType.Regex) {
+        // Clear regex_pattern as it's only used for regex parser
+        form.setValue('parser_config.regex_pattern', undefined);
+        // Reset delimiter to default newline
+        const currentDelimiter = form.getValues('parser_config.delimiter');
+        if (currentDelimiter === '\n。.；;！!？？') {
+          form.setValue('parser_config.delimiter', '\n');
+        }
+      }
+
+      // Update previous parser ID when parser changes
+      setPreviousParserId(selectedTag);
+    }
+  }, [selectedTag, form, isDataLoaded, previousParserId]);
   return (
     <section className="p-5 h-full flex flex-col">
       <TopTitle

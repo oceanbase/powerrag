@@ -5,8 +5,13 @@ import {
   File,
   FileChartColumnIncreasing,
   FileStack,
+  FileText,
+  FileType,
   Heading,
   ListMinus,
+  Scissors,
+  Search,
+  Zap,
 } from 'lucide-react';
 import { Operator } from './constant';
 
@@ -26,6 +31,13 @@ export const SVGIconMap = {
   [Operator.Splitter]: Blocks,
   [Operator.HierarchicalMerger]: Heading,
   [Operator.Extractor]: FileStack,
+  // PowerRAG Components
+  [Operator.PowerRAGPDFParser]: FileText,
+  [Operator.PowerRAGDocumentToPDF]: FileType,
+  [Operator.PowerRAGTitleBasedSplitter]: Blocks,
+  [Operator.PowerRAGRegexBasedSplitter]: Scissors,
+  [Operator.PowerRAGSmartBasedSplitter]: Zap,
+  [Operator.PowerRAGEntityExtractor]: Search,
 };
 
 const Empty = () => {

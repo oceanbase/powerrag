@@ -14,9 +14,12 @@ import { PaperConfiguration } from './configuration/paper';
 import { PictureConfiguration } from './configuration/picture';
 import { PresentationConfiguration } from './configuration/presentation';
 import { QAConfiguration } from './configuration/qa';
+import { RegexConfiguration } from './configuration/regex';
 import { ResumeConfiguration } from './configuration/resume';
+import { SmartConfiguration } from './configuration/smart';
 import { TableConfiguration } from './configuration/table';
 import { TagConfiguration } from './configuration/tag';
+import { TitleConfiguration } from './configuration/title';
 
 const ConfigurationComponentMap = {
   [DocumentParserType.Naive]: NaiveConfiguration,
@@ -34,6 +37,9 @@ const ConfigurationComponentMap = {
   [DocumentParserType.Email]: EmailConfiguration,
   [DocumentParserType.Tag]: TagConfiguration,
   [DocumentParserType.KnowledgeGraph]: KnowledgeGraphConfiguration,
+  [DocumentParserType.Title]: TitleConfiguration,
+  [DocumentParserType.Regex]: RegexConfiguration,
+  [DocumentParserType.Smart]: SmartConfiguration,
 };
 
 function EmptyComponent() {

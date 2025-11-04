@@ -21,8 +21,12 @@ export const formSchema = z
     parser_config: z
       .object({
         layout_recognize: z.string(),
+        pdf_parser: z.string().optional(),
         chunk_token_num: z.number(),
         delimiter: z.string(),
+        regex_pattern: z.string().optional(),
+        title_level: z.number().optional(),
+        min_chunk_tokens: z.number().optional(),
         auto_keywords: z.number().optional(),
         auto_questions: z.number().optional(),
         html4excel: z.boolean(),

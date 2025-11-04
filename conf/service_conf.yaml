@@ -32,6 +32,20 @@ redis:
   db: 1
   password: 'infini_rag_flow'
   host: 'localhost:6379'
+oceanbase:
+  scheme: 'mysql' # set 'mysql' to create connection using mysql config
+  config:
+    db_name: 'test'
+# gotenberg:
+#   url: 'http://localhost:3000'
+#   timeout: 60
+# mineru:
+#   hosts: 'http://localhost:8000'  # MinerU API service URL (启动 docker-compose mineru-api 服务后使用)
+#   backend: 'pipeline'  # 或 'vlm-http-client' 如果使用 vllm-server
+#   # server_url: 'http://localhost:30000'  # 仅当 backend 为 vlm-http-client 时需要
+#   # 如果不配置此项，将自动降级到本地 mineru CLI（需要通过 pip install -U 'mineru[core]' 安装）
+# dots_ocr:
+#   vllm_url: 'http://localhost:8020'
 # postgres:
 #   name: 'rag_flow'
 #   user: 'rag_flow'
