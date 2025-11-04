@@ -22,6 +22,7 @@ from enum import Enum, IntEnum
 import rag.utils
 import rag.utils.es_conn
 import rag.utils.infinity_conn
+import rag.utils.ob_conn
 import rag.utils.opensearch_conn
 from api.constants import RAG_FLOW_SERVICE_NAME
 from api.utils.configs import decrypt_database_config, get_base_config
@@ -48,6 +49,7 @@ PARSERS = None
 HOST_IP = None
 HOST_PORT = None
 SECRET_KEY = None
+PUBLIC_SERVER_URL = None
 FACTORY_LLM_INFOS = None
 
 DATABASE_TYPE = os.getenv("DB_TYPE", "mysql")
@@ -133,11 +135,12 @@ def init_settings():
     if not LIGHTEN:
         EMBEDDING_MDL = BUILTIN_EMBEDDING_MODELS[0]
 
-    global API_KEY, PARSERS, HOST_IP, HOST_PORT, SECRET_KEY
+    global API_KEY, PARSERS, HOST_IP, HOST_PORT, SECRET_KEY, PUBLIC_SERVER_URL
     API_KEY = LLM.get("api_key")
     PARSERS = LLM.get(
-        "parsers", "naive:General,qa:Q&A,resume:Resume,manual:Manual,table:Table,paper:Paper,book:Book,laws:Laws,presentation:Presentation,picture:Picture,one:One,audio:Audio,email:Email,tag:Tag"
+        "parsers", "naive:General,qa:Q&A,resume:Resume,manual:Manual,table:Table,paper:Paper,book:Book,laws:Laws,presentation:Presentation,picture:Picture,one:One,audio:Audio,email:Email,tag:Tag,title:Title,smart:Smart,regex:Regex"
     )
+    PUBLIC_SERVER_URL = os.environ.get("PUBLIC_SERVER_URL")
 
     chat_entry = _parse_model_entry(LLM_DEFAULT_MODELS.get("chat_model", CHAT_MDL))
     embedding_entry = _parse_model_entry(LLM_DEFAULT_MODELS.get("embedding_model", EMBEDDING_MDL))
@@ -184,6 +187,8 @@ def init_settings():
         docStoreConn = rag.utils.infinity_conn.InfinityConnection()
     elif lower_case_doc_engine == "opensearch":
         docStoreConn = rag.utils.opensearch_conn.OSConnection()
+    elif lower_case_doc_engine == "oceanbase":
+        docStoreConn = rag.utils.ob_conn.OBConnection()
     else:
         raise Exception(f"Not supported doc engine: {DOC_ENGINE}")
 

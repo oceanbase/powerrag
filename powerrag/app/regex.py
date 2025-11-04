@@ -1,0 +1,223 @@
+#
+#  Copyright 2025 The OceanBase Authors. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+#
+
+import os
+import re
+import copy
+import logging
+
+from powerrag.app.pdf_parser_factory import create_pdf_parser
+from rag.nlp import rag_tokenizer
+import requests
+import io
+from rag.nlp import find_codec
+from api.utils.configs import get_base_config
+
+from powerrag.server.services.split_service import regex_based_chunking
+
+logger = logging.getLogger(__name__)
+
+def chunk(filename=None, binary=None, from_page=0, to_page=100000, lang="Chinese", callback=None, kb_id=None, **kwargs):
+    """
+    Supported file formats are pdf, doc, docx, markdown, or plain text.
+    This method apply the title ways to chunk files or text.
+    Successive text will be sliced into pieces using 'title'.
+    
+    Args:
+        filename: Optional filename (can be None for text-only chunking)
+        binary: Binary content or text content (str or bytes)
+        ...
+    """
+
+    parser_config = kwargs.get("parser_config", 
+    {"title_level": 3, "layout_recognize": "mineru", "chunk_token_num": 256, "enable_ocr": False, "delimiter": r'[.!?]+\s*',
+    "enable_image_understanding": False, "enable_table": True, "enable_formula": False})
+
+    layout_recognize = parser_config.get("layout_recognize", "mineru")
+    doc = {"docnm_kwd": filename, "title_tks": rag_tokenizer.tokenize(re.sub(r"\.[a-zA-Z]+$", "", filename))}
+    chunk_token_num = parser_config.get("chunk_token_num", 256)
+    is_english = lang.lower() == "english"  # is_english(cks)
+    formula_enable = parser_config.get("enable_formula", False)
+    enable_table = parser_config.get("enable_table", True)
+    enable_ocr = parser_config.get("enable_ocr", False)
+    enable_image_understanding = parser_config.get("enable_image_understanding", False)
+    pdf_parser = None
+    res = []
+    chunks = []
+    if callback:
+        callback(0.1, "Start to parse.")
+    
+    # Handle PDF files directly
+    if re.search(r"\.pdf$", filename, re.IGNORECASE):
+        tenant_id = kwargs.get("tenant_id", "default")
+        pdf_parser = create_pdf_parser(filename, parser_config, tenant_id=tenant_id, lang=lang)
+    
+    # Handle Office files (Word, Excel, PowerPoint) - convert to PDF first
+    elif re.search(r"\.(docx?|doc?|pptx?|ppt?)$", filename, re.IGNORECASE):
+        if callback:
+            callback(0.15, "Converting Office document to PDF...")
+        try:
+            # Get Gotenberg service URL from config
+            gotenberg_config = get_base_config("gotenberg", {}) or {}
+            gotenberg_url = gotenberg_config.get("url", "http://localhost:3000")
+            
+            # Convert Office document to PDF using Gotenberg
+            url = f"{gotenberg_url}/forms/libreoffice/convert"
+            files = {'files': (filename, io.BytesIO(binary) if binary else open(filename, 'rb'))}
+            
+            logging.info(f"Converting Office document to PDF via Gotenberg: {filename}")
+            response = requests.post(url, files=files, timeout=120)
+            
+            if response.status_code != 200:
+                raise Exception(f"Gotenberg conversion failed with status {response.status_code}: {response.text}")
+            
+            pdf_binary = response.content
+            logging.info(f"Successfully converted {filename} to PDF ({len(pdf_binary)} bytes)")
+            
+            # Parse the converted PDF
+            pdf_filename = os.path.splitext(filename)[0] + ".pdf"
+            tenant_id = kwargs.get("tenant_id", "default")
+            pdf_parser = create_pdf_parser(pdf_filename, parser_config, tenant_id=tenant_id, lang=lang)
+            binary = pdf_binary  # Use converted PDF binary for parsing
+            
+            if callback:
+                callback(0.2, "Office document converted to PDF successfully")
+        except Exception as e:
+            error_msg = f"Failed to convert Office document to PDF: {str(e)}"
+            logging.error(error_msg)
+            if callback:
+                callback(-1, error_msg)
+            raise Exception(error_msg)
+    
+    # Handle HTML files - convert to PDF first
+    elif re.search(r"\.(html?|htm)$", filename, re.IGNORECASE):
+        if callback:
+            callback(0.15, "Converting HTML document to PDF...")
+        try:
+            # Get Gotenberg service URL from config
+            gotenberg_config = get_base_config("gotenberg", {}) or {}
+            gotenberg_url = gotenberg_config.get("url", "http://localhost:3000")
+            
+            # Convert HTML document to PDF using Gotenberg
+            url = f"{gotenberg_url}/forms/chromium/convert/html"
+            files = {'files': (filename, io.BytesIO(binary) if binary else open(filename, 'rb'))}
+            
+            logging.info(f"Converting HTML document to PDF via Gotenberg: {filename}")
+            response = requests.post(url, files=files, timeout=120)
+            
+            if response.status_code != 200:
+                raise Exception(f"Gotenberg conversion failed with status {response.status_code}: {response.text}")
+            
+            pdf_binary = response.content
+            logging.info(f"Successfully converted {filename} to PDF ({len(pdf_binary)} bytes)")
+            
+            # Parse the converted PDF
+            pdf_filename = os.path.splitext(filename)[0] + ".pdf"
+            tenant_id = kwargs.get("tenant_id", "default")
+            pdf_parser = create_pdf_parser(pdf_filename, parser_config, tenant_id=tenant_id, lang=lang)
+            binary = pdf_binary  # Use converted PDF binary for parsing
+            
+            if callback:
+                callback(0.2, "HTML document converted to PDF successfully")
+        except Exception as e:
+            error_msg = f"Failed to convert HTML document to PDF: {str(e)}"
+            logging.error(error_msg)
+            if callback:
+                callback(-1, error_msg)
+            raise Exception(error_msg)
+    
+    # Handle Markdown files directly
+    elif re.search(r"\.(md|markdown|html?|htm|txt|csv)$", filename, re.IGNORECASE):
+        txt = ''
+        if binary:
+            encoding = find_codec(binary)
+            txt = binary.decode(encoding, errors="ignore")
+        else:
+            with open(filename, "r") as f:
+                txt = f.read()
+        
+        # Use the regex-based chunking method from split_service.py
+        chunks = regex_based_chunking(txt, parser_config)
+        
+        # Process the chunks into the expected format
+        res = []
+        for i, chunk_content in enumerate(chunks):
+            doc_chunk = copy.deepcopy(doc)
+            doc_chunk["content_with_weight"] = chunk_content
+            doc_chunk["chunk_id"] = f"{filename}-chunk-{i}"
+            
+            # Add position information to maintain document order
+            # For non-PDF files, use chunk index as position
+            from powerrag.app import add_positions
+            add_positions(doc_chunk, [[i]*5])
+            
+            tokenize(doc_chunk, chunk_content, is_english)
+            res.append(doc_chunk)
+        
+        if callback:
+            callback(1.0, "Finished chunking.")
+        
+        return res
+    else:
+        raise NotImplementedError(f"File type not supported yet: {filename}. Supported types: PDF, Office (docx, pptx), HTML, Markdown")
+
+    if pdf_parser:
+        md, _ = pdf_parser(binary, from_page, to_page, callback=callback, kb_id=kb_id)
+        # 检查md是否为空
+        if not md:
+            return []
+        # pdf_parser returns a list, extract the first element (markdown content)
+        md_content = md[0] if isinstance(md, list) else md
+        # Use the order-guaranteed chunking method to ensure consistency with original document
+        chunks = regex_based_chunking(md_content, parser_config=parser_config)
+
+    for i, chunk_content in enumerate(chunks):
+        doc_chunk = copy.deepcopy(doc)
+        doc_chunk["content_with_weight"] = chunk_content
+        doc_chunk["chunk_id"] = f"{filename}-chunk-{i}"
+        
+        # Add position information to maintain document order
+        # If pdf_parser is available, try to get actual positions from PDF
+        if pdf_parser:
+            try:
+                # Try to get position from PDF parser
+                _, poss = pdf_parser.crop(chunk_content, need_position=True)
+                from powerrag.app import add_positions
+                add_positions(doc_chunk, poss)
+            except (NotImplementedError, AttributeError, Exception):
+                # Fallback: use chunk index as position
+                from powerrag.app import add_positions
+                add_positions(doc_chunk, [[i]*5])
+        else:
+            # No PDF parser: use chunk index as position
+            from powerrag.app import add_positions
+            add_positions(doc_chunk, [[i]*5])
+        
+        tokenize(doc_chunk, chunk_content, is_english)
+        res.append(doc_chunk)
+
+    if callback:
+        callback(1.0, "Finished chunking.")
+
+    return res
+def tokenize(doc, content, eng):
+    """
+    Tokenize the content and add to document
+    """
+    # Implementation based on common pattern in other chunk methods
+    doc["content_ltks"] = rag_tokenizer.fine_grained_tokenize(content)
+    doc["content_sm_ltks"] = rag_tokenizer.tokenize(content)
+    return doc

@@ -32,6 +32,7 @@ S3 = {}
 MINIO = {}
 OSS = {}
 OS = {}
+OB = {}
 
 # Initialize the selected configuration data based on environment variables to solve the problem of initialization errors due to lack of configuration
 if DOC_ENGINE == 'elasticsearch':
@@ -40,6 +41,8 @@ elif DOC_ENGINE == 'opensearch':
     OS = get_base_config("os", {})
 elif DOC_ENGINE == 'infinity':
     INFINITY = get_base_config("infinity", {"uri": "infinity:23817"})
+elif DOC_ENGINE == 'oceanbase':
+    OB = get_base_config("oceanbase", {})
 
 if STORAGE_IMPL_TYPE in ['AZURE_SPN', 'AZURE_SAS']:
     AZURE = get_base_config("azure", {})

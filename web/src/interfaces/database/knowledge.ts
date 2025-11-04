@@ -53,12 +53,18 @@ export interface ParserConfig {
   auto_questions?: number;
   chunk_token_num?: number;
   delimiter?: string;
+  regex_pattern?: string;
   html4excel?: boolean;
-  layout_recognize?: boolean;
+  layout_recognize?: string; // 'mineru' or 'dots_ocr'
   raptor?: Raptor;
   tag_kb_ids?: string[];
   topn_tags?: number;
   graphrag?: { use_graphrag?: boolean };
+  title_level?: number; // Title level for Title parser (1-6)
+  min_chunk_tokens?: number;
+  task_page_size?: number;
+  toc_extraction?: boolean;
+  pages?: number[][];
 }
 
 export interface IKnowledgeFileParserConfig {

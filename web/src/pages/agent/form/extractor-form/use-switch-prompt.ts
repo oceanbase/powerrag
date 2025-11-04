@@ -7,14 +7,17 @@ import { z } from 'zod';
 
 export const FormSchema = z.object({
   field_name: z.string(),
-  sys_prompt: z.string(),
+  sys_prompt: z.string().optional(),
   prompts: z.string().optional(),
+  extraction_type: z.enum(['simple', 'langextract']).default('simple'),
+  prompt_description: z.string().optional(),
+  examples: z.array(z.any()).optional(),
   ...LlmSettingSchema,
 });
 
 export type ExtractorFormSchemaType = z.infer<typeof FormSchema>;
 
-export function useSwitchPrompt(form: UseFormReturn<ExtractorFormSchemaType>) {
+export function useSwitchPrompt(form: UseFormReturn<any>) {
   const { visible, showModal, hideModal } = useSetModalState();
   const { t } = useTranslation();
   const previousFieldNames = useRef<string[]>([form.getValues('field_name')]);

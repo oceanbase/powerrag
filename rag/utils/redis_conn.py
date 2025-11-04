@@ -16,6 +16,7 @@
 
 import logging
 import json
+import os
 import uuid
 
 import valkey as redis
@@ -23,6 +24,10 @@ from rag import settings
 from rag.utils import singleton
 from valkey.lock import Lock
 import trio
+
+from rag.utils.ob_redis_conn import MysqlDistributedLock, OceanBaseRedisDb
+from rag.utils.redis_able import RedisAble
+
 
 class RedisMsg:
     def __init__(self, consumer, queue_name, group_name, msg_id, message):
@@ -48,7 +53,7 @@ class RedisMsg:
 
 
 @singleton
-class RedisDB:
+class RedisDB(RedisAble):
     lua_delete_if_equal = None
     LUA_DELETE_IF_EQUAL_SCRIPT = """
         local current_value = redis.call('get', KEYS[1])
@@ -365,7 +370,22 @@ class RedisDB:
         return False
 
 
-REDIS_CONN = RedisDB()
+CACHE_TYPE = os.getenv("CACHE_TYPE", "oceanbase")
+lower_case_cache_type = CACHE_TYPE.lower()
+REDIS_CONN = None
+if lower_case_cache_type == "oceanbase":
+    logging.info("Use OceanBase for caching, set CACHE_TYPE='redis' if you want to use redis cache")
+    REDIS_CONN = OceanBaseRedisDb()
+else:
+    logging.info("Use Redis for caching")
+    REDIS_CONN = RedisDB()
+
+
+def distributed_lock(lock_key, lock_value=None, timeout=10, blocking_timeout=1):
+    if lower_case_cache_type == "oceanbase":
+        return MysqlDistributedLock(lock_key, lock_value, timeout, blocking_timeout)
+    else:
+        return RedisDistributedLock(lock_key, lock_value, timeout, blocking_timeout)
 
 
 class RedisDistributedLock:

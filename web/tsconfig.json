@@ -1,5 +1,7 @@
 {
   "extends": "./src/.umi/tsconfig.json",
-  "@@/*": ["src/.umi/*"],
-  "root": ["../*"],
+  "compilerOptions": {
+    "skipLibCheck": true,
+    "types": [],
+  },
 }

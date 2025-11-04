@@ -50,7 +50,7 @@ del _package_path, _import_submodules, _extract_classes_from_module
 
 
 def component_class(class_name):
-    for mdl in ["agent.component", "agent.tools", "rag.flow"]:
+    for mdl in ["agent.component", "agent.tools", "rag.flow", "powerrag.flow.parsers", "powerrag.flow.splitters", "powerrag.flow.extractors", "powerrag.flow.converters"]:
         try:
             return getattr(importlib.import_module(mdl), class_name)
         except Exception:

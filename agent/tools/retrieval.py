@@ -25,7 +25,7 @@ from api.db.services.llm_service import LLMBundle
 from api import settings
 from api.utils.api_utils import timeout
 from rag.app.tag import label_question
-from rag.prompts.generator import cross_languages, kb_prompt, gen_meta_filter
+from rag.prompts.generator import cross_languages, kb_prompt, apply_metadata_filter
 
 
 class RetrievalParam(ToolParamBase):
@@ -121,19 +121,11 @@ class Retrieval(ToolBase, ABC):
         vars = {k:o["value"] for k,o in vars.items()}
         query = self.string_format(kwargs["query"], vars)
         
-        doc_ids=[]
-        if self._param.meta_data_filter!={}:
+        doc_ids = []
+        if self._param.meta_data_filter != {}:
             metas = DocumentService.get_meta_by_kbs(kb_ids)
-            if self._param.meta_data_filter.get("method") == "auto":
-                chat_mdl = LLMBundle(self._canvas.get_tenant_id(), LLMType.CHAT)
-                filters = gen_meta_filter(chat_mdl, metas, query)
-                doc_ids.extend(meta_filter(metas, filters))
-                if not doc_ids:
-                    doc_ids = None
-            elif self._param.meta_data_filter.get("method") == "manual":
-                doc_ids.extend(meta_filter(metas, self._param.meta_data_filter["manual"]))
-                if not doc_ids:
-                    doc_ids = None
+            chat_mdl = LLMBundle(self._canvas.get_tenant_id(), LLMType.CHAT)
+            doc_ids = apply_metadata_filter(metas, self._param.meta_data_filter, query, chat_mdl, None, kb_ids)
 
         if self._param.cross_languages:
             query = cross_languages(kbs[0].tenant_id, None, query, self._param.cross_languages)

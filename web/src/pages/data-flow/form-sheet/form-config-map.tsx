@@ -2,6 +2,7 @@ import { Operator } from '../constant';
 import ExtractorForm from '../form/extractor-form';
 import HierarchicalMergerForm from '../form/hierarchical-merger-form';
 import ParserForm from '../form/parser-form';
+import { PowerRAGFormConfigMap } from '../form/powerrag-form';
 import SplitterForm from '../form/splitter-form';
 import TokenizerForm from '../form/tokenizer-form';
 
@@ -27,4 +28,6 @@ export const FormConfigMap = {
   [Operator.Extractor]: {
     component: ExtractorForm,
   },
+  // PowerRAG Components
+  ...PowerRAGFormConfigMap,
 };

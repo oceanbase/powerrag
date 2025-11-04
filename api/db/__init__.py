@@ -99,6 +99,9 @@ class ParserType(StrEnum):
     EMAIL = "email"
     KG = "knowledge_graph"
     TAG = "tag"
+    TITLE = "title"  # PowerRAG Title Parser
+    REGEX = "regex"  # PowerRAG Regex Parser
+    SMART = "smart"  # PowerRAG Smart Parser
 
 
 class FileSource(StrEnum):

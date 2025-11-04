@@ -229,6 +229,9 @@ export const initialHierarchicalMergerValues = {
 export const initialExtractorValues = {
   ...initialLlmBaseValues,
   field_name: ContextGeneratorFieldName.Summary,
+  extraction_type: 'simple', // 'simple' or 'langextract'
+  prompt_description: '', // Required for langextract
+  examples: [], // List of example dicts for langextract
   outputs: {
     chunks: { type: 'Array<Object>', value: [] },
   },

@@ -47,6 +47,9 @@ import { NextStepDropdown } from './node/dropdown/next-step-dropdown';
 import { ExtractorNode } from './node/extractor-node';
 import NoteNode from './node/note-node';
 import ParserNode from './node/parser-node';
+import PowerRAGExtractorNode from './node/powerrag-extractor-node';
+import PowerRAGParserNode from './node/powerrag-parser-node';
+import PowerRAGSplitterNode from './node/powerrag-splitter-node';
 import { SplitterNode } from './node/splitter-node';
 import TokenizerNode from './node/tokenizer-node';
 
@@ -58,6 +61,10 @@ export const nodeTypes: NodeTypes = {
   tokenizerNode: TokenizerNode,
   splitterNode: SplitterNode,
   contextNode: ExtractorNode,
+  // PowerRAG Nodes
+  powerragParserNode: PowerRAGParserNode,
+  powerragSplitterNode: PowerRAGSplitterNode,
+  powerragExtractorNode: PowerRAGExtractorNode,
 };
 
 const edgeTypes = {

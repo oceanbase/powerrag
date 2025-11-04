@@ -17,4 +17,5 @@ export const ImageMap = {
   one: getImageName('one', 2),
   knowledge_graph: getImageName('knowledge-graph', 2),
   tag: getImageName('tag', 2),
+  title: getImageName('naive', 2), // Use naive images for title parser temporarily
 };

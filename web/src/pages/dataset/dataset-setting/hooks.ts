@@ -38,20 +38,67 @@ export const useFetchKnowledgeConfigurationOnMount = (
   const { data: knowledgeDetails } = useFetchKnowledgeBaseConfiguration();
 
   useEffect(() => {
+    if (!knowledgeDetails || !knowledgeDetails.parser_id) {
+      return;
+    }
+
+    // Start with backend data first, then merge defaults for missing fields
+    const backendParserConfig = knowledgeDetails.parser_config || {};
+    const defaultParserConfig =
+      form.formState?.defaultValues?.parser_config || {};
+
+    // Set default delimiter and regex_pattern based on parser type
+    let defaultDelimiter = defaultParserConfig.delimiter || '\n';
+    let defaultRegexPattern = defaultParserConfig.regex_pattern || '[.!?]+\\s*';
+
+    if (knowledgeDetails.parser_id === 'regex') {
+      if (!backendParserConfig.delimiter) {
+        defaultDelimiter = '\n。.；;！!？？';
+      }
+      if (!backendParserConfig.regex_pattern) {
+        defaultRegexPattern = '[.!?]+\\s*';
+      }
+    }
+
     const parser_config = {
-      ...form.formState?.defaultValues?.parser_config,
-      ...knowledgeDetails.parser_config,
+      // Start with defaults
+      ...defaultParserConfig,
+      // Override with backend data (backend data takes priority)
+      ...backendParserConfig,
+      // Set delimiter: use backend value if exists, otherwise use parser-specific default
+      delimiter: backendParserConfig.delimiter || defaultDelimiter,
+      // Set regex_pattern: use backend value if exists, otherwise use parser-specific default
+      regex_pattern: backendParserConfig.regex_pattern || defaultRegexPattern,
+      // Handle nested objects
       raptor: {
-        ...form.formState?.defaultValues?.parser_config?.raptor,
-        ...knowledgeDetails.parser_config?.raptor,
-        use_raptor: true,
+        ...defaultParserConfig?.raptor,
+        ...backendParserConfig?.raptor,
+        use_raptor: backendParserConfig?.raptor?.use_raptor ?? true,
       },
       graphrag: {
-        ...form.formState?.defaultValues?.parser_config?.graphrag,
-        ...knowledgeDetails.parser_config?.graphrag,
-        use_graphrag: true,
+        ...defaultParserConfig?.graphrag,
+        ...backendParserConfig?.graphrag,
+        use_graphrag: backendParserConfig?.graphrag?.use_graphrag ?? true,
       },
     };
+
+    // Explicitly preserve title_level from backend if it exists
+    if (
+      backendParserConfig.title_level !== undefined &&
+      backendParserConfig.title_level !== null
+    ) {
+      parser_config.title_level = backendParserConfig.title_level;
+    }
+
+    console.log(
+      '🔍 Final parser_config:',
+      JSON.stringify(parser_config, null, 2),
+    );
+    console.log(
+      '🔍 Final parser_config.title_level:',
+      parser_config.title_level,
+    );
+
     const formValues = {
       ...pick({ ...knowledgeDetails, parser_config: parser_config }, [
         'description',
@@ -65,7 +112,56 @@ export const useFetchKnowledgeConfigurationOnMount = (
         'avatar',
       ]),
     } as z.infer<typeof formSchema>;
-    form.reset(formValues);
+
+    console.log(
+      '🔍 Form values before reset:',
+      JSON.stringify(formValues, null, 2),
+    );
+    console.log(
+      '🔍 Form values.parser_config.title_level:',
+      formValues.parser_config?.title_level,
+    );
+
+    // Use reset with options to ensure values are properly set
+    form.reset(formValues, {
+      keepDefaultValues: false,
+      keepValues: false,
+    });
+
+    // Verify after reset - use multiple checks
+    setTimeout(() => {
+      const currentTitleLevel = form.getValues('parser_config.title_level');
+      const currentParserConfig = form.getValues('parser_config');
+      console.log(
+        '🔍 Form value after reset - parser_config.title_level:',
+        currentTitleLevel,
+      );
+      console.log(
+        '🔍 Form value after reset - parser_config:',
+        JSON.stringify(currentParserConfig, null, 2),
+      );
+
+      // If title_level is not correct, try to set it again
+      if (
+        formValues.parser_config?.title_level !== undefined &&
+        formValues.parser_config?.title_level !== null &&
+        currentTitleLevel !== formValues.parser_config?.title_level
+      ) {
+        console.warn(
+          '⚠️ title_level mismatch! Expected:',
+          formValues.parser_config?.title_level,
+          'Got:',
+          currentTitleLevel,
+        );
+        console.warn('⚠️ Attempting to fix by setting title_level directly...');
+        form.setValue(
+          'parser_config.title_level',
+          formValues.parser_config.title_level,
+        );
+        const fixedTitleLevel = form.getValues('parser_config.title_level');
+        console.log('🔧 Fixed title_level:', fixedTitleLevel);
+      }
+    }, 200);
   }, [form, knowledgeDetails]);
 
   return knowledgeDetails;

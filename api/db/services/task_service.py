@@ -17,6 +17,7 @@ import logging
 import os
 import random
 import xxhash
+import requests
 from datetime import datetime
 
 from api.db.db_utils import bulk_insert_into_db
@@ -342,7 +343,9 @@ def queue_tasks(doc: dict, bucket: str, name: str, priority: int):
         - For Excel documents, tasks are created per row range
         - Task digests are calculated for optimization and reuse
         - Previous task chunks may be reused if available
+        - If parser_id is regex/smart/title, the request is forwarded to PowerRAG server
     """
+    queue_powerrag_tasks(doc)
 
     def new_task():
         return {
@@ -521,3 +524,56 @@ def queue_dataflow(tenant_id:str, flow_id:str, task_id:str, doc_id:str=CANVAS_DE
         return False, "Can't access Redis. Please check the Redis' status."
 
     return True, ""
+
+def queue_powerrag_tasks(doc: dict):
+    # Check if parser_id is regex/smart/title, 
+    # if so, forward to PowerRAG server
+    # Skip forwarding if this request is already from PowerRAG server (avoid circular calls)
+    is_from_powerrag = doc.get("_from_powerrag", False)
+    if is_from_powerrag:
+        return
+    
+    layout_recognize = doc.get("parser_config", {}).get("layout_recognize", "")
+    parser_id = doc.get("parser_id", "")
+    
+    # PowerRAG-supported parsers: regex, smart, title, or dots_ocr layout recognition
+    powerrag_parsers = {"regex", "smart", "title"}
+    should_forward = (
+        parser_id in powerrag_parsers
+    )
+    
+    if should_forward:
+        try:
+            powerrag_url = "http://localhost:6000"
+            # if not powerrag_url:
+            #     logging.warning("PowerRAG server URL not configured, falling back to default RAGFlow processing")
+            #     powerrag_url = "http://localhost:6000"
+            
+            # Forward request to PowerRAG server
+            powerrag_endpoint = f"{powerrag_url}/api/v1/powerrag/run"
+            payload = {
+                "doc_ids": [doc["id"]],
+                "run": "1",  # Start parsing
+                "delete": False
+            }
+            
+            logging.info(f"Forwarding document {doc['id']} to PowerRAG server at {powerrag_endpoint}")
+            response = requests.post(
+                powerrag_endpoint,
+                json=payload,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("code") == 0:
+                    logging.info(f"Successfully forwarded document {doc['id']} to PowerRAG server")
+                    return
+                else:
+                    logging.error(f"PowerRAG server returned error: {result.get('message', 'Unknown error')}")
+            else:
+                logging.error(f"PowerRAG server request failed with status {response.status_code}: {response.text}")
+        except Exception as e:
+            logging.error(f"Failed to forward request to PowerRAG server: {str(e)}", exc_info=True)
+            # Fall through to continue with normal RAGFlow processing
+        # If PowerRAG forwarding fails, continue with normal processing

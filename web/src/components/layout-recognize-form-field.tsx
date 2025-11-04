@@ -18,6 +18,7 @@ export const enum ParseDocumentType {
   DeepDOC = 'DeepDOC',
   PlainText = 'Plain Text',
   MinerU = 'MinerU',
+  DotsOCR = 'dots_ocr',
 }
 
 export function LayoutRecognizeFormField({
@@ -43,6 +44,7 @@ export function LayoutRecognizeFormField({
           ParseDocumentType.DeepDOC,
           ParseDocumentType.PlainText,
           ParseDocumentType.MinerU,
+          ParseDocumentType.DotsOCR,
         ].map((x) => ({
           label: x === ParseDocumentType.PlainText ? t(camelCase(x)) : x,
           value: x,

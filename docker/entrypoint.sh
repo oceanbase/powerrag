@@ -12,10 +12,12 @@ function usage() {
     echo "  --disable-taskexecutor          Disables task executor workers."
     echo "  --enable-mcpserver              Enables the MCP server."
     echo "  --enable-adminserver            Enables the Admin server."
+    echo "  --enable-powerragserver         Enables the PowerRAG server."
     echo "  --consumer-no-beg=<num>         Start range for consumers (if using range-based)."
     echo "  --consumer-no-end=<num>         End range for consumers (if using range-based)."
     echo "  --workers=<num>                 Number of task executors to run (if range is not used)."
     echo "  --host-id=<string>              Unique ID for the host (defaults to \`hostname\`)."
+    echo "  --powerrag-port=<num>           PowerRAG server port (default: 6000)."
     echo
     echo "Examples:"
     echo "  $0 --disable-taskexecutor"
@@ -23,6 +25,7 @@ function usage() {
     echo "  $0 --disable-webserver --workers=2 --host-id=myhost123"
     echo "  $0 --enable-mcpserver"
     echo "  $0 --enable-adminserver"
+    echo "  $0 --enable-powerragserver --powerrag-port=6000"
     exit 1
 }
 
@@ -30,6 +33,7 @@ ENABLE_WEBSERVER=1 # Default to enable web server
 ENABLE_TASKEXECUTOR=1  # Default to enable task executor
 ENABLE_MCP_SERVER=0
 ENABLE_ADMIN_SERVER=0 # Default close admin server
+ENABLE_POWERRAG_SERVER=1 # Default close PowerRAG server
 CONSUMER_NO_BEG=0
 CONSUMER_NO_END=0
 WORKERS=1
@@ -43,6 +47,8 @@ MCP_HOST_API_KEY=""
 MCP_TRANSPORT_SSE_FLAG="--transport-sse-enabled"
 MCP_TRANSPORT_STREAMABLE_HTTP_FLAG="--transport-streamable-http-enabled"
 MCP_JSON_RESPONSE_FLAG="--json-response"
+
+POWERRAG_PORT=6000
 
 # -----------------------------------------------------------------------------
 # Host ID logic:
@@ -75,6 +81,14 @@ for arg in "$@"; do
       ;;
     --enable-adminserver)
       ENABLE_ADMIN_SERVER=1
+      shift
+      ;;
+    --enable-powerragserver)
+      ENABLE_POWERRAG_SERVER=1
+      shift
+      ;;
+    --powerrag-port=*)
+      POWERRAG_PORT="${arg#*=}"
       shift
       ;;
     --mcp-host=*)
@@ -178,6 +192,14 @@ function start_mcp_server() {
         "${MCP_JSON_RESPONSE_FLAG}" &
 }
 
+function start_powerrag_server() {
+    echo "Starting PowerRAG Server on ${POWERRAG_PORT}..."
+    while true; do
+        "$PY" powerrag/server/powerrag_server.py \
+            --port="${POWERRAG_PORT}"
+    done &
+}
+
 # -----------------------------------------------------------------------------
 # Start components based on flags
 # -----------------------------------------------------------------------------
@@ -201,6 +223,10 @@ fi
 
 if [[ "${ENABLE_MCP_SERVER}" -eq 1 ]]; then
     start_mcp_server
+fi
+
+if [[ "${ENABLE_POWERRAG_SERVER}" -eq 1 ]]; then
+    start_powerrag_server
 fi
 
 if [[ "${ENABLE_TASKEXECUTOR}" -eq 1 ]]; then

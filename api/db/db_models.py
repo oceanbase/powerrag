@@ -26,7 +26,7 @@ from functools import wraps
 
 from flask_login import UserMixin
 from itsdangerous.url_safe import URLSafeTimedSerializer as Serializer
-from peewee import InterfaceError, OperationalError, BigIntegerField, BooleanField, CharField, CompositeKey, DateTimeField, Field, FloatField, IntegerField, Metadata, Model, TextField
+from peewee import InterfaceError, OperationalError, BigIntegerField, BooleanField, CharField, CompositeKey, DateTimeField, Field, FloatField, IntegerField, Metadata, Model, TextField, BigAutoField, SQL
 from playhouse.migrate import MySQLMigrator, PostgresqlMigrator, migrate
 from playhouse.pool import PooledMySQLDatabase, PooledPostgresqlDatabase
 
@@ -139,9 +139,9 @@ def remove_field_name_prefix(field_name):
 
 class BaseModel(Model):
     create_time = BigIntegerField(null=True, index=True)
-    create_date = DateTimeField(null=True, index=True)
+    create_date = DateTimeField(null=True, index=True, constraints=[SQL('DEFAULT CURRENT_TIMESTAMP')])
     update_time = BigIntegerField(null=True, index=True)
-    update_date = DateTimeField(null=True, index=True)
+    update_date = DateTimeField(null=True, index=True, constraints=[SQL('DEFAULT CURRENT_TIMESTAMP')])
 
     def to_json(self):
         # This function is obsolete
@@ -1042,6 +1042,71 @@ class PipelineOperationLog(DataBaseModel):
 
     class Meta:
         db_table = "pipeline_operation_log"
+
+
+class Cache(DataBaseModel):
+    """
+        cache 表，存 kv
+        由于目前本项目中用到的 key 的规模有限, 暂时采用 lazy expire 模式
+    """
+    id = BigAutoField(primary_key=True)
+    cache_key = CharField(max_length=256, null=False, help_text="Cache key", unique=True)
+    cache_value = LongTextField(null=False, help_text="Cache value")
+    expire_time = DateTimeField(null=False, help_text="expire time")
+
+    class Meta:
+        db_table = "cache"
+
+
+class Message(DataBaseModel):
+    """
+        用于存消息队列
+    """
+    id = BigAutoField(primary_key=True)
+    stream = CharField(max_length=512, null=False, help_text="stream")
+    message = LongTextField(null=True, help_text="message")
+    consumed = BooleanField(null=False, help_text="consumed by any consumer group", default=False)
+
+    class Meta:
+        db_table = "message"
+
+
+class MessageSubscribe(DataBaseModel):
+    """
+        用于存消息队列订阅关系
+    """
+    id = BigAutoField(primary_key=True)
+    stream = CharField(max_length=512, null=False, help_text="stream")
+    group_name = CharField(max_length=512, null=False, help_text="group_name")
+    consumer_name = CharField(max_length=512, null=False, help_text="consumer_name")
+
+    class Meta:
+        db_table = "message_subscribe"
+        indexes = (
+            (('stream', 'group_name', 'consumer_name'), True),
+        )
+
+
+class MessageConsumption(DataBaseModel):
+    """
+        用于存消息队列消费历史
+    """
+    id = BigAutoField(primary_key=True)
+    stream = CharField(max_length=512, null=False, help_text="stream")
+    group_name = CharField(max_length=512, null=False, help_text="group_name")
+    consumer_name = CharField(max_length=512, null=False, help_text="consumer_name")
+    message_id = BigIntegerField(null=False)
+    ack = BooleanField(null=False, help_text="ack", default=False)
+
+    class Meta:
+        db_table = "message_consumption"
+        indexes = (
+            (('stream', 'group_name', 'consumer_name', 'message_id'), False),
+            (('stream', 'group_name', 'message_id'), True),
+            (('stream', 'group_name', 'ack', 'message_id'), False),
+            (('stream', 'ack', 'message_id'), False),
+            (('stream', 'group_name', 'consumer_name', 'ack', 'message_id'), False),
+        )
 
 
 def migrate_db():

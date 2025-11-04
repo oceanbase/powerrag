@@ -1,3 +1,8 @@
+console.log(
+  '🔍🔍🔍 next-step-dropdown.tsx loaded - PowerRAG version - BUILD ' +
+    Date.now(),
+);
+
 import {
   Accordion,
   AccordionContent,
@@ -158,16 +163,19 @@ function AccordionOperators({
       ...restrictSingleOperatorOnCanvas([Operator.Parser, Operator.Tokenizer]),
     ];
     list.push(Operator.Extractor);
+
     return list;
   }, [restrictSingleOperatorOnCanvas]);
 
   const chunkerOperators = useMemo(() => {
-    return [
+    const result = [
       ...restrictSingleOperatorOnCanvas([
         Operator.Splitter,
         Operator.HierarchicalMerger,
       ]),
     ];
+
+    return result;
   }, [restrictSingleOperatorOnCanvas]);
 
   const showChunker = useMemo(() => {

@@ -175,6 +175,10 @@ export interface ISearchAppDetailProps {
     meta_data_filter?: {
       method: string;
       manual: { key: string; op: string; value: string }[];
+      langextract_config?: {
+        prompt_description?: string;
+        examples?: any[];
+      };
     };
   };
   tenant_id: string;

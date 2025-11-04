@@ -44,7 +44,7 @@ from api.versions import get_ragflow_version
 from api.utils.configs import show_configs
 from rag.settings import print_rag_settings
 from rag.utils.mcp_tool_call_conn import shutdown_all_mcp_sessions
-from rag.utils.redis_conn import RedisDistributedLock
+from rag.utils.redis_conn import distributed_lock
 
 stop_event = threading.Event()
 
@@ -52,7 +52,7 @@ RAGFLOW_DEBUGPY_LISTEN = int(os.environ.get('RAGFLOW_DEBUGPY_LISTEN', "0"))
 
 def update_progress():
     lock_value = str(uuid.uuid4())
-    redis_lock = RedisDistributedLock("update_progress", lock_value=lock_value, timeout=60)
+    redis_lock = distributed_lock("update_progress", lock_value=lock_value, timeout=60)
     logging.info(f"update_progress lock_value: {lock_value}")
     while not stop_event.is_set():
         try:

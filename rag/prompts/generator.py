@@ -18,7 +18,7 @@ import json
 import logging
 import re
 from copy import deepcopy
-from typing import Tuple
+from typing import Optional, Tuple
 import jinja2
 import json_repair
 import trio
@@ -154,6 +154,63 @@ REFLECT = load_prompt("reflect")
 SUMMARY4MEMORY = load_prompt("summary4memory")
 RANK_MEMORY = load_prompt("rank_memory")
 META_FILTER = load_prompt("meta_filter")
+try:
+    LANGEXTRACT_META_FILTER = load_prompt("langextract_meta_filter")
+except FileNotFoundError:
+    # Default template for langextract meta filter
+    LANGEXTRACT_META_FILTER = """You are a metadata filtering condition generator for langextract extractions. Analyze the user's question, extraction schema, and available langextract metadata to output a JSON array of filter objects.
+
+1. **Langextract Metadata Structure**: 
+   - Langextract metadata is a list of extraction objects, each containing:
+     - extraction_class: The type/category of extraction (e.g., "Product", "Person", "Event")
+     - extraction_text: The extracted text content
+     - attributes: Additional attributes as key-value pairs (e.g., {% raw %}{{"price": "100", "category": "electronics"}}{% endraw %})
+   - Example metadata structure:
+     {% raw %}[
+       {"extraction_class": "Product", "extraction_text": "iPhone 15", "attributes": {"price": "999", "brand": "Apple"}},
+       {"extraction_class": "Product", "extraction_text": "Samsung Galaxy", "attributes": {"price": "899", "brand": "Samsung"}}
+     ]{% endraw %}
+
+2. **Extraction Schema**:
+   - Prompt Description: {{prompt_description}}
+   - Examples: {{examples}}
+   - Additional Context (available langextract data): {{additional_context}}
+
+3. **Output Requirements**:
+   - Always output a JSON array of filter objects
+   - Each object must have:
+        "key": (filter key, e.g., "extraction_class", "extraction_text", or "attributes_<attr_name>"),
+        "value": (string value to compare),
+        "op": (operator from allowed list)
+
+4. **Operator Guide**:
+   - Use these operators only: ["contains", "not contains", "start with", "end with", "empty", "not empty", "=", "≠", ">", "<", "≥", "≤"]
+   - For extraction_class and extraction_text: Use "contains", "=", or "≠"
+   - For attributes: Use "attributes_<attr_name>" as key (e.g., "attributes_price")
+   - Date ranges: Break into two conditions (≥ start_date AND < next_month_start)
+   - Negations: Always use "≠" for exclusion terms ("not", "except", "exclude")
+
+5. **Processing Steps**:
+   a) Identify filterable fields from the extraction schema and user query
+   b) Match against extraction_class, extraction_text, or attributes
+   c) Generate appropriate filter conditions
+   d) Skip conditions if field doesn't exist in the extraction schema
+
+6. **Example**:
+   - User query: "Find products with price less than 1000"
+   - Output: 
+        {% raw %}[
+          {"key": "extraction_class", "value": "Product", "op": "="},
+          {"key": "attributes_price", "value": "1000", "op": "<"}
+        ]{% endraw %}
+
+**Current Task**:
+- Today's date: {{current_date}}
+- Extraction schema: {{prompt_description}}
+- Examples: {{examples}}
+- User query: "{{user_question}}"
+
+Generate filters:"""
 ASK_SUMMARY = load_prompt("ask_summary")
 
 PROMPT_JINJA_ENV = jinja2.Environment(autoescape=False, trim_blocks=True, lstrip_blocks=True)
@@ -439,6 +496,505 @@ def gen_meta_filter(chat_mdl, meta_data:dict, query: str) -> list:
     except Exception:
         logging.exception(f"Loading json failure: {ans}")
     return []
+
+
+def gen_langextract_meta_filter(chat_mdl, query: str, prompt_description: str, 
+                                examples: list = None, additional_context: str = None) -> list:
+    """
+    Generate metadata filter conditions for langextract based on query, extraction schema, and context.
+    
+    Args:
+        chat_mdl: Chat model for LLM generation
+        query: User query string
+        prompt_description: Extraction prompt description for langextract (defines extraction schema)
+        examples: List of example dicts for langextract (shows extraction structure)
+        additional_context: Additional context string (available metadata.langextract data)
+    
+    Returns:
+        List of filter dicts with "key", "value", "op" format, same as gen_meta_filter
+    """
+    try:
+        # Format examples as JSON string
+        examples_str = json.dumps(examples, ensure_ascii=False, indent=2) if examples else "[]"
+        
+        # Build system prompt
+        sys_prompt = PROMPT_JINJA_ENV.from_string(LANGEXTRACT_META_FILTER).render(
+            current_date=datetime.datetime.today().strftime('%Y-%m-%d'),
+            prompt_description=prompt_description,
+            examples=examples_str,
+            additional_context=additional_context or "",
+            user_question=query
+        )
+        
+        user_prompt = "Generate filters:"
+        ans = chat_mdl.chat(sys_prompt, [{"role": "user", "content": user_prompt}])
+        ans = re.sub(r"(^.*</think>|```json\n|```\n*$)", "", ans, flags=re.DOTALL)
+        try:
+            ans = json_repair.loads(ans)
+            assert isinstance(ans, list), ans
+            return ans
+        except Exception:
+            logging.exception(f"Loading json failure: {ans}")
+            return []
+    except Exception as e:
+        logging.exception(f"Error in gen_langextract_meta_filter: {e}")
+        return []
+
+
+def format_langextract_filter_context(metas: dict, filters: Optional[list] = None, doc_ids: Optional[list] = None) -> str:
+    """
+    Format langextract metadata as a context string for LLM-based filtering.
+
+    Args:
+        metas: Metadata dictionary returned by DocumentService.get_meta_by_kbs.
+        filters: Optional list of filter conditions to apply.
+        doc_ids: Optional list of document IDs to restrict the context to.
+
+    Returns:
+        Formatted string containing available langextract extraction information.
+    """
+    if "langextract" not in metas or not metas["langextract"]:
+        return ""
+    
+    # Get langextract data structure
+    # metas["langextract"] should be a dict mapping extraction values to doc_ids
+    # Format: {"extraction_class": {"Product": ["doc1", "doc2"], ...}, ...}
+    langextract_data = metas["langextract"]
+    
+    # If doc_ids provided, filter to only those documents
+    if doc_ids:
+        filtered_data = {}
+        for key, value_map in langextract_data.items():
+            filtered_value_map = {}
+            for val, docs in value_map.items():
+                filtered_docs = [d for d in docs if d in doc_ids]
+                if filtered_docs:
+                    filtered_value_map[val] = filtered_docs
+            if filtered_value_map:
+                filtered_data[key] = filtered_value_map
+        langextract_data = filtered_data
+    
+    # Format as JSON string for context
+    try:
+        context_str = json.dumps(langextract_data, ensure_ascii=False, indent=2)
+        return f"Available langextract metadata:\n{context_str}"
+    except Exception as e:
+        logging.exception(f"Error formatting langextract context: {e}")
+        return ""
+
+
+def _filter_langextract_docs(metas: dict, filters: list, regular_doc_ids: Optional[list] = None) -> list:
+    """
+    Filter documents based on langextract metadata filters.
+    
+    Args:
+        metas: Metadata dict from DocumentService.get_meta_by_kbs
+        filters: List of filter conditions (same format as gen_meta_filter)
+        regular_doc_ids: Optional list of doc_ids from regular metadata filtering (for intersection)
+    
+    Returns:
+        List of document IDs that match the langextract filters
+    """
+    if "langextract" not in metas or not metas["langextract"]:
+        return []
+    
+    if not filters:
+        return []
+    
+    # Get all documents that have langextract metadata
+    all_langextract_docs = set()
+    langextract_meta = metas["langextract"]
+    
+    
+        
+    # langextract_meta structure: {str(meta_list): [doc_id1, doc_id2, ...], ...}
+    # where meta_list is a list of extraction dicts
+    for meta_items_str, doc_ids in langextract_meta.items():
+        try:
+            # Try to parse as JSON first
+            if isinstance(meta_items_str, str):
+                try:
+                    meta_items = json.loads(meta_items_str)
+                except (json.JSONDecodeError, ValueError):
+                    # If JSON parsing fails, try using json_repair or ast.literal_eval
+                    try:
+                        import ast
+                        meta_items = ast.literal_eval(meta_items_str)
+                    except (ValueError, SyntaxError):
+                        logging.warning(f"Failed to parse meta_items: {meta_items_str[:100]}")
+                        continue
+            else:
+                # If it's already a list/dict, use it directly
+                meta_items = meta_items_str
+            
+            # Ensure meta_items is a list
+            if not isinstance(meta_items, list):
+                if isinstance(meta_items, dict):
+                    meta_items = [meta_items]
+                else:
+                    logging.warning(f"meta_items is not a list or dict: {type(meta_items)}")
+                    continue
+            is_match = True
+            for filter_item in filters:
+                key = filter_item.get("key", "")
+                op = filter_item.get("op", "=")
+                value = filter_item.get("value", "")
+                is_filter_match = False
+                # Process each meta item
+                for meta_item in meta_items:
+                    if not isinstance(meta_item, dict):
+                        continue
+                    
+                    # Handle different key formats
+                    if key == "extraction_class":
+                        if "extraction_class" in meta_item:
+                            v = meta_item["extraction_class"]
+                            is_filter_match = _is_match_filter_operator(v, op, value)
+                    elif key == "extraction_text":
+                        if "extraction_text" in meta_item:
+                            v = meta_item["extraction_text"]
+                            is_filter_match = _is_match_filter_operator(v, op, value)
+                            
+                    elif key.startswith("attributes_"):
+                        # Filter by attribute (e.g., "attributes_price")
+                        attr_name = key.replace("attributes_", "")
+                        attr_key = f"attributes_{attr_name}"
+                        if attr_key in meta_item:
+                            v = meta_item[attr_key]
+                            is_filter_match = _is_match_filter_operator(v, op, value)
+                    # This means the current filter condition has been successfully matched, can continue to check the next filter condition
+                    if is_filter_match:
+                        break
+                # This means the current filter condition has not been matched, can break out of the loop
+                if not is_filter_match:
+                    is_match = False
+                    break
+            if is_match:
+                all_langextract_docs.update(doc_ids)
+        except Exception as e:
+            logging.exception(f"Error processing meta_items: {e}")
+            continue
+    
+    result_doc_ids = list(all_langextract_docs)
+    
+    # Intersect with regular_doc_ids if provided
+    if regular_doc_ids:
+        result_doc_ids = [d for d in result_doc_ids if d in regular_doc_ids]
+    
+    return result_doc_ids
+
+
+def _is_match_filter_operator(value_in_meta: str, operator: str, value: str) -> bool:
+    """
+    Applies a filter operator for a single metadata value.
+
+    Args:
+        value_in_meta: The value from the metadata to compare.
+        operator: The filter operator to apply (e.g., contains, =, ≠, >, <, ≥, ≤, not contains, start with, end with).
+        value: The value to compare against.
+
+    Returns:
+        bool: True if value_in_meta matches the operator and value, otherwise False.
+    """
+    is_match = False
+    try:
+        # Try numeric comparison
+        value_in_meta_num = float(value_in_meta)
+        val_num = float(value)
+        
+        if operator == "=":
+            is_match = value_in_meta_num == val_num
+        elif operator == "≠":
+            is_match = value_in_meta_num != val_num
+        elif operator == ">":
+            is_match = value_in_meta_num > val_num
+        elif operator == "<":
+            is_match = value_in_meta_num < val_num
+        elif operator == "≥":
+            is_match = value_in_meta_num >= val_num
+        elif operator == "≤":
+            is_match = value_in_meta_num <= val_num
+        elif operator == "contains":
+            is_match = str(value).lower() in str(value_in_meta_num).lower()
+        elif operator == "not contains":
+            is_match = str(value).lower() not in str(value_in_meta_num).lower()
+        elif operator == "start with":
+            is_match = str(value_in_meta_num).lower().startswith(str(value).lower())
+        elif operator == "end with":
+            is_match = str(value_in_meta_num).lower().endswith(str(value).lower())
+    except (ValueError, TypeError):
+        # String comparison
+        value_in_meta_str = str(value_in_meta).lower()
+        val_str = str(value).lower()
+        
+        if operator == "=":
+            is_match = value_in_meta_str == val_str
+        elif operator == "≠":
+            is_match = value_in_meta_str != val_str
+        elif operator == ">":
+            # String comparison for > operator
+            is_match = value_in_meta_str > val_str
+        elif operator == "<":
+            # String comparison for < operator
+            is_match = value_in_meta_str < val_str
+        elif operator == "≥":
+            # String comparison for ≥ operator
+            is_match = value_in_meta_str >= val_str
+        elif operator == "≤":
+            # String comparison for ≤ operator
+            is_match = value_in_meta_str <= val_str
+        elif operator == "contains":
+            is_match = val_str in value_in_meta_str
+        elif operator == "not contains":
+            is_match = val_str not in value_in_meta_str
+        elif operator == "start with":
+            is_match = value_in_meta_str.startswith(val_str)
+        elif operator == "end with":
+            is_match = value_in_meta_str.endswith(val_str)
+        elif operator == "empty":
+            is_match = not value_in_meta_str
+        elif operator == "not empty":
+            is_match = value_in_meta_str
+    return is_match
+  
+
+
+def _get_langextract_config_from_pipeline(kb_ids: list) -> Optional[dict]:
+    """
+    Get langextract configuration from knowledge base's pipeline.
+    Searches for Extractor nodes with extraction_type="langextract" in the pipeline DSL.
+    
+    Args:
+        kb_ids: List of knowledge base IDs
+    
+    Returns:
+        Dict with "prompt_description" and "examples" if found, None otherwise.
+        Returns None if no langextract extractor is found in the pipeline (e.g., when using simple extraction).
+    """
+    try:
+        from api.db.services.knowledgebase_service import KnowledgebaseService
+        from api.db.services.canvas_service import UserCanvasService
+        import json
+        
+        # Get knowledge bases
+        kbs = KnowledgebaseService.get_by_ids(kb_ids)
+        if not kbs:
+            return None
+        
+        # Try each KB's pipeline
+        for kb in kbs:
+            if not kb.pipeline_id:
+                continue
+            
+            # Get pipeline DSL
+            e, canvas = UserCanvasService.get_by_canvas_id(kb.pipeline_id)
+            if not e or not canvas:
+                continue
+            
+            dsl = canvas.get("dsl") if isinstance(canvas, dict) else canvas.dsl
+            if not dsl:
+                continue
+            
+            # Parse DSL if it's a string
+            if isinstance(dsl, str):
+                try:
+                    dsl = json.loads(dsl)
+                except Exception:
+                    continue
+            
+            # Find Extractor nodes with extraction_type="langextract"
+            components = dsl.get("components", {})
+            for component_id, component in components.items():
+                obj = component.get("obj", {})
+                component_name = obj.get("component_name", "")
+                params = obj.get("params", {})
+                
+                # Check if this is an Extractor node with langextract type
+                if component_name == "Extractor":
+                    extraction_type = params.get("extraction_type", "")
+                    if extraction_type == "langextract":
+                        prompt_description = params.get("prompt_description", "")
+                        examples = params.get("examples", [])
+                        if prompt_description:
+                            return {
+                                "prompt_description": prompt_description,
+                                "examples": examples if examples else []
+                            }
+        
+        return None
+    except Exception as e:
+        logging.exception(f"Error getting langextract config from pipeline: {e}")
+        return None
+
+
+def apply_metadata_filter(metas: dict, meta_data_filter: dict, query: str, chat_mdl, initial_doc_ids: Optional[list] = None, kb_ids: Optional[list] = None):
+    """
+    Apply metadata filtering with support for both regular and langextract metadata.
+    This is a unified function that handles all metadata filtering logic.
+    
+    Args:
+        metas: Metadata dict from DocumentService.get_meta_by_kbs
+        meta_data_filter: Filter configuration dict with keys:
+            - method: "auto" or "manual"
+            - manual: List of filter dicts (for manual method)
+            - enable_custom_langextract_config: Optional boolean flag to enable custom langchain extraction config.
+                                                If False or not set, will use config from knowledge base pipeline.
+            - langextract_config: Optional dict with langextract config:
+                - prompt_description: Extraction prompt description
+                - examples: List of example dicts
+        query: User query string (for auto method)
+        chat_mdl: Chat model instance (for auto method)
+        initial_doc_ids: Optional initial list of doc_ids to start with
+        kb_ids: Optional list of knowledge base IDs (used to get langextract config from pipeline)
+    
+    Note:
+        Whether langextract filtering is used depends on:
+        1. Whether there is langextract metadata in the knowledge base
+        2. Whether a valid prompt_description can be obtained (from custom config or pipeline)
+    
+    Returns:
+        List of filtered document IDs, or None if no documents match
+    """
+    from api.db.services.dialog_service import meta_filter
+    
+    if not meta_data_filter:
+        return initial_doc_ids if initial_doc_ids else None
+    
+    doc_ids = None
+    
+    # Check if custom langchain extraction config is enabled
+    enable_custom_langextract_config = meta_data_filter.get("enable_custom_langextract_config", False)
+    
+    # Check if there's langextract metadata and configuration
+    has_langextract = False
+    langextract_config = meta_data_filter.get("langextract_config")
+    prompt_description = ""
+    examples = []
+    
+    # Try to get langextract config: use custom config if enabled, otherwise use pipeline config
+    if kb_ids:
+        # If custom config is enabled, try to get from custom config first
+        if enable_custom_langextract_config and langextract_config:
+            prompt_description = langextract_config.get("prompt_description", "")
+            examples = langextract_config.get("examples", [])
+        
+        # If custom config is not enabled or missing/incomplete, try to get from pipeline
+        if not enable_custom_langextract_config or not prompt_description or not examples:
+            pipeline_config = _get_langextract_config_from_pipeline(kb_ids)
+            if pipeline_config:
+                if not prompt_description:
+                    prompt_description = pipeline_config.get("prompt_description", "")
+                if not examples:
+                    examples = pipeline_config.get("examples", [])
+                
+                # If using pipeline config, update langextract_config for consistency
+                # but don't overwrite custom config if it's enabled
+                if not enable_custom_langextract_config:
+                    if not langextract_config:
+                        langextract_config = {}
+                        meta_data_filter["langextract_config"] = langextract_config
+                    if prompt_description:
+                        langextract_config["prompt_description"] = prompt_description
+                    if examples:
+                        langextract_config["examples"] = examples
+        
+        # Check if we have prompt_description and if any document has langextract metadata
+        if prompt_description:
+            # Check if any document has langextract metadata
+            if "langextract" in metas and metas["langextract"]:
+                has_langextract = True
+    
+    if has_langextract and prompt_description:
+        # Use langextract-specific filtering
+        # prompt_description and examples are already set above
+        
+        if meta_data_filter.get("method") == "auto" or meta_data_filter.get("method") == "automatic":
+            # First, get initial filters using regular meta_filter (for non-langextract fields)
+            regular_metas = {k: v for k, v in metas.items() if k != "langextract"}
+            regular_doc_ids = []
+            if regular_metas:
+                regular_filters = gen_meta_filter(chat_mdl, regular_metas, query)
+                regular_doc_ids = meta_filter(regular_metas, regular_filters)
+            
+            # Get initial additional_context from all documents (before filtering)
+            # initial_additional_context = format_langextract_filter_context(metas, [], None)
+            
+            # Generate langextract-specific filters
+            langextract_filters = gen_langextract_meta_filter(
+                chat_mdl, query, prompt_description, examples
+            )
+            
+            # Apply langextract filters to get filtered doc_ids
+            if langextract_filters:
+                # Apply langextract filters using meta_filter logic adapted for langextract structure
+                langextract_doc_ids = _filter_langextract_docs(metas, langextract_filters, regular_doc_ids)
+                
+                # Combine regular and langextract filtered doc_ids
+                if regular_doc_ids:
+                    doc_ids = list(set(regular_doc_ids) & set(langextract_doc_ids))
+                else:
+                    doc_ids = langextract_doc_ids
+            else:
+                doc_ids = regular_doc_ids
+            
+            # Intersect with initial_doc_ids if provided
+            if initial_doc_ids:
+                doc_ids = [d for d in doc_ids if d in initial_doc_ids]
+            
+            if not doc_ids:
+                doc_ids = None
+        elif meta_data_filter.get("method") == "manual":
+            # Manual filters for langextract
+            manual_filters = meta_data_filter["manual"]
+            # Separate regular and langextract filters
+            regular_filters = [f for f in manual_filters if f.get("key") != "langextract" and 
+                              f.get("key") not in ["extraction_class", "extraction_text"] and
+                              not f.get("key", "").startswith("attributes_")]
+            langextract_filters = [f for f in manual_filters if f.get("key") in ["extraction_class", "extraction_text"] or
+                                  f.get("key", "").startswith("attributes_")]
+            
+            regular_doc_ids = []
+            if regular_filters:
+                regular_metas = {k: v for k, v in metas.items() if k != "langextract"}
+                if regular_metas:
+                    regular_doc_ids = meta_filter(regular_metas, regular_filters)
+            
+            if langextract_filters:
+                langextract_doc_ids = _filter_langextract_docs(metas, langextract_filters, regular_doc_ids)
+                if regular_doc_ids:
+                    doc_ids = list(set(regular_doc_ids) & set(langextract_doc_ids))
+                else:
+                    doc_ids = langextract_doc_ids
+            else:
+                doc_ids = regular_doc_ids
+            
+            # Intersect with initial_doc_ids if provided
+            if initial_doc_ids:
+                doc_ids = [d for d in doc_ids if d in initial_doc_ids]
+            
+            if not doc_ids:
+                doc_ids = None
+    else:
+        # Regular metadata filtering (non-langextract)
+        if meta_data_filter.get("method") == "auto" or meta_data_filter.get("method") == "automatic":
+            filters = gen_meta_filter(chat_mdl, metas, query)
+            filtered_doc_ids = meta_filter(metas, filters)
+            if initial_doc_ids:
+                doc_ids = [d for d in filtered_doc_ids if d in initial_doc_ids]
+            else:
+                doc_ids = filtered_doc_ids
+            if not doc_ids:
+                doc_ids = None
+        elif meta_data_filter.get("method") == "manual":
+            filtered_doc_ids = meta_filter(metas, meta_data_filter["manual"])
+            if initial_doc_ids:
+                doc_ids = [d for d in filtered_doc_ids if d in initial_doc_ids]
+            else:
+                doc_ids = filtered_doc_ids
+            if not doc_ids:
+                doc_ids = None
+    
+    return doc_ids
 
 
 def gen_json(system_prompt:str, user_prompt:str, chat_mdl, gen_conf = None):

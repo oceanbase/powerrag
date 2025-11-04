@@ -40,7 +40,7 @@ from rag.app.resume import forbidden_select_fields4resume
 from rag.app.tag import label_question
 from rag.nlp.search import index_name
 from rag.prompts.generator import chunks_format, citation_prompt, cross_languages, full_question, kb_prompt, keyword_extraction, message_fit_in, \
-    gen_meta_filter, PROMPT_JINJA_ENV, ASK_SUMMARY
+    gen_meta_filter, apply_metadata_filter, PROMPT_JINJA_ENV, ASK_SUMMARY
 from rag.utils import num_tokens_from_string, rmSpace
 from rag.utils.tavily_conn import Tavily
 
@@ -404,15 +404,7 @@ def chat(dialog, messages, stream=True, **kwargs):
 
     if dialog.meta_data_filter:
         metas = DocumentService.get_meta_by_kbs(dialog.kb_ids)
-        if dialog.meta_data_filter.get("method") == "auto":
-            filters = gen_meta_filter(chat_mdl, metas, questions[-1])
-            attachments.extend(meta_filter(metas, filters))
-            if not attachments:
-                attachments = None
-        elif dialog.meta_data_filter.get("method") == "manual":
-            attachments.extend(meta_filter(metas, dialog.meta_data_filter["manual"]))
-            if not attachments:
-                attachments = None
+        attachments = apply_metadata_filter(metas, dialog.meta_data_filter, questions[-1], chat_mdl, attachments, dialog.kb_ids)
 
     if prompt_config.get("keyword", False):
         questions[-1] += keyword_extraction(chat_mdl, questions[-1])
@@ -767,15 +759,7 @@ def ask(question, kb_ids, tenant_id, chat_llm_name=None, search_config={}):
 
     if meta_data_filter:
         metas = DocumentService.get_meta_by_kbs(kb_ids)
-        if meta_data_filter.get("method") == "auto":
-            filters = gen_meta_filter(chat_mdl, metas, question)
-            doc_ids.extend(meta_filter(metas, filters))
-            if not doc_ids:
-                doc_ids = None
-        elif meta_data_filter.get("method") == "manual":
-            doc_ids.extend(meta_filter(metas, meta_data_filter["manual"]))
-            if not doc_ids:
-                doc_ids = None
+        doc_ids = apply_metadata_filter(metas, meta_data_filter, question, chat_mdl, doc_ids, kb_ids)
 
     kbinfos = retriever.retrieval(
         question=question,
@@ -842,15 +826,7 @@ def gen_mindmap(question, kb_ids, tenant_id, search_config={}):
 
     if meta_data_filter:
         metas = DocumentService.get_meta_by_kbs(kb_ids)
-        if meta_data_filter.get("method") == "auto":
-            filters = gen_meta_filter(chat_mdl, metas, question)
-            doc_ids.extend(meta_filter(metas, filters))
-            if not doc_ids:
-                doc_ids = None
-        elif meta_data_filter.get("method") == "manual":
-            doc_ids.extend(meta_filter(metas, meta_data_filter["manual"]))
-            if not doc_ids:
-                doc_ids = None
+        doc_ids = apply_metadata_filter(metas, meta_data_filter, question, chat_mdl, doc_ids, kb_ids)
 
     ranks = settings.retriever.retrieval(
         question=question,
