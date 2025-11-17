@@ -1,0 +1,141 @@
+name: release
+
+on:
+  push:
+    branches:
+      - "v*"
+    tags:
+      - "*"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCKER_REPO: ${{ vars.DOCKER_REPO || 'oceanbase' }}
+  IMAGE_TAG: ${{ vars.DOCKER_REPO || 'oceanbase' }}/powerrag:${{ github.ref_name }}
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Free disk space
+        uses: kfir4444/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Prepare Docker
+        run: |
+          sudo mkdir -p /mnt/powerrag /mnt/docker
+          echo '{"data-root": "/mnt/docker"}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl daemon-reload
+          sudo systemctl restart docker
+          sleep 2
+          docker info > /dev/null || (echo "Docker restart failed" && exit 1)
+          sudo chmod 777 /mnt/powerrag
+          sudo mv * .* /mnt/powerrag 2>/dev/null || true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Prepare dependencies for arm64
+        if: matrix.platform == 'linux/arm64'
+        run: |
+          echo "Setting up Python..."
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-pip
+          
+          echo "Installing Python dependencies..."
+          python3 -m pip install --upgrade pip
+          python3 -m pip install huggingface-hub nltk
+          
+          echo "Downloading dependencies..."
+          cd /mnt/powerrag
+          python3 download_deps.py
+          
+          echo "Dependencies prepared successfully"
+
+      - name: Build dependency image for arm64
+        if: matrix.platform == 'linux/arm64'
+        run: |
+          echo "Building dependency image for arm64 build..."
+          docker build \
+            --file /mnt/powerrag/Dockerfile.deps \
+            --tag infiniflow/ragflow_deps:latest \
+            /mnt/powerrag
+          echo "Dependency image built successfully"
+
+      - name: Build and push image
+        env:
+          PLATFORM_TAG: ${{ env.IMAGE_TAG }}-${{ matrix.platform == 'linux/amd64' && 'linux-amd64' || 'linux-arm64' }}
+        run: |
+          echo "Building ${{ matrix.platform }} image: ${PLATFORM_TAG}"
+          docker build \
+            --build-arg LIGHTEN=1 \
+            --file /mnt/powerrag/Dockerfile \
+            --tag ${PLATFORM_TAG} \
+            /mnt/powerrag
+          docker push ${PLATFORM_TAG}
+          echo "Successfully built and pushed: ${PLATFORM_TAG}"
+
+  manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free disk space
+        uses: kfir4444/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
+      - name: Prepare Docker
+        run: |
+          sudo mkdir -p /mnt/docker
+          echo '{"data-root": "/mnt/docker"}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl daemon-reload
+          sudo systemctl restart docker
+          sleep 2
+          docker info > /dev/null || (echo "Docker restart failed" && exit 1)
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Create and push multi-platform manifest
+        run: |
+          echo "Creating multi-platform manifest for ${IMAGE_TAG}"
+          docker buildx imagetools create --tag ${IMAGE_TAG} \
+            ${IMAGE_TAG}-linux-amd64 \
+            ${IMAGE_TAG}-linux-arm64
+          echo "Successfully created and pushed multi-platform manifest: ${IMAGE_TAG}"
