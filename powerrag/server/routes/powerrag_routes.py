@@ -177,11 +177,7 @@ def run_parse():
                 if run_status == TaskStatus.RUNNING.value:
                     doc_dict = doc.to_dict()
                     doc_dict["tenant_id"] = tenant_id
-                    
-                    # Apply config updates
-                    # if config:
-                    #     doc_dict["parser_id"] = parser_id
-                        # doc_dict["parser_config"] = config["parser_config"]
+                    doc_dict["_from_powerrag"] = True
                     
                     bucket, name = File2DocumentService.get_storage_address(doc_id=doc_id)
                     queue_tasks(doc_dict, bucket, name, 0)

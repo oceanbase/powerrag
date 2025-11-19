@@ -97,7 +97,7 @@ class VllmParser:
         # Set vllm_url if provided, otherwise will be read from config in __call__
         self.vllm_url = vllm_url
 
-    def __call__(self, binary=None, from_page=0, to_page=100000, callback=None, doc_id: str = "default", kb_id: str = "default"):
+    def __call__(self, binary=None, from_page=0, to_page=100000, callback=None, kb_id: str = "default"):
         if callback:
             callback(msg=f"start to parse by vLLM model: {self.model_name}")
 
@@ -120,14 +120,13 @@ class VllmParser:
         
         try:
             # Parse document using vLLM
-            # Pass kb_id and doc_id to parse_document so images are stored in the correct directory
+            # Pass kb_id parse_document so images are stored in the correct directory
             status, result = self.parse_document(
                 self.filename, 
                 binary, 
                 from_page=from_page, 
                 to_page=to_page, 
                 vllm_url=self.vllm_url,
-                doc_id=doc_id,
                 kb_id=kb_id
             )
         except Exception as e:
@@ -153,11 +152,11 @@ class VllmParser:
                 md_content = first_file.get("md_content", "").replace("\n\n", "\n")
                 
                 # Images are already stored in layoutjson2md, but we may need to update URLs
-                # if they were stored in a temporary directory. Since we now pass kb_id and doc_id to
+                # if they were stored in a temporary directory. Since we now pass kb_id to
                 # parse_document, images should already be in the correct location.
                 # However, we still call store_images for backward compatibility and to handle
                 # any images that might come from the API response (though vLLM doesn't return separate images)
-                output_dir = f"{kb_id}/{doc_id}" if kb_id and doc_id else (doc_id if doc_id else "default")
+                output_dir = kb_id
                 new_md_content = self.store_images(md_content, images, output_dir=output_dir)
                 return [new_md_content], []
             else:
@@ -165,7 +164,7 @@ class VllmParser:
         else:
             return [""], []
 
-    def parse_document(self, filename, binary=None, from_page: int = 0, to_page: int = 100000, vllm_url=None, doc_id: str = None, kb_id: str = None) -> Tuple[int, Union[Dict, str]]:
+    def parse_document(self, filename, binary=None, from_page: int = 0, to_page: int = 100000, vllm_url=None, kb_id: str = None) -> Tuple[int, Union[Dict, str]]:
         """
         Parse document using vLLM API
 
@@ -175,7 +174,6 @@ class VllmParser:
             from_page: Starting page number to parse (default: 0)
             to_page: Ending page number to parse (default: 100000)
             vllm_url: vLLM service URL for inference
-            doc_id: Document ID for storing images
             kb_id: Knowledge base ID for storing images. Images will be stored in kb_id/doc_id path.
 
         Returns:
@@ -197,13 +195,8 @@ class VllmParser:
             images = self._pdf_to_images(input_data, from_page, to_page)
             
             # Process each image with vLLM
-            # Use kb_id/doc_id as output_dir if provided, otherwise use a temporary directory
-            if kb_id and doc_id:
-                output_dir = f"{kb_id}/{doc_id}"
-            elif doc_id:
-                output_dir = doc_id
-            else:
-                output_dir = f"vllm_temp_{os.path.basename(filename).replace('.', '_')}"
+            # Use kb_id as output_dir if provided, otherwise use a temporary directory
+            output_dir = kb_id
             
             all_md_content = []
             for i, image_pil in enumerate(images):

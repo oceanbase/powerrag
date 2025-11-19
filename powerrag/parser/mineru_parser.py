@@ -408,8 +408,6 @@ class MinerUPdfParser:
                     server_url = f"http://{server_url}"
                 
                 # Construct the image URL using PowerRAG chunk image endpoint
-                # output_dir format: {kb_id} (doc_id is ignored)
-                # Extract kb_id from output_dir (which may be {kb_id} or {kb_id}/{doc_id})
                 kb_id = output_dir.split('/')[0] if '/' in output_dir else output_dir
                 image_url = f"{server_url}/api/v1/powerrag/chunk/image/{kb_id}/{img_name}"
 
