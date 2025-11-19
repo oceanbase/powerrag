@@ -34,7 +34,7 @@ from powerrag.server.services.split_service import title_based_chunking
 logger = logging.getLogger(__name__)
 
 
-def chunk(filename=None, binary=None, from_page=0, to_page=100000, lang="Chinese", callback=None, doc_id=None, kb_id=None, **kwargs):
+def chunk(filename=None, binary=None, from_page=0, to_page=100000, lang="Chinese", callback=None, kb_id=None, **kwargs):
     """
     Supported file formats are pdf, doc, docx, markdown, or plain text.
     This method apply the title ways to chunk files or text.
@@ -158,12 +158,17 @@ def chunk(filename=None, binary=None, from_page=0, to_page=100000, lang="Chinese
         raise NotImplementedError(f"File type not supported yet: {filename}. Supported types: PDF, Office (docx, pptx), HTML, Markdown")
 
     if pdf_parser:
-        res, _ = pdf_parser(binary, from_page, to_page, callback=callback, parser_config=parser_config, doc_id=doc_id, kb_id=kb_id)
+        res, _ = pdf_parser(binary, from_page, to_page, callback=callback, kb_id=kb_id)
         # 检查res是否为空
         if not res:
             return []
+        # Handle case where res is a list (some parsers return [markdown_content] instead of markdown_content)
+        if len(res) > 0:
+            md_content = res[0] if isinstance(res[0], str) else "\n".join(str(item) for item in res)
+        else:
+            return []
         # Use the order-guaranteed chunking method to ensure consistency with original document
-        chunks, _ = title_based_chunking(md_content=res, parser_config=parser_config)
+        chunks, _ = title_based_chunking(md_content=md_content, parser_config=parser_config)
 
     # Ensure all chunks are strings (handle case where chunks might be tuples)
     processed_chunks = []
