@@ -6,8 +6,7 @@ on:
       - "**/*.md"
   push:
     branches:
-      - main
-      - 'feat**'
+      - '**'
     paths-ignore:
       - "**/*.md"
 
@@ -64,7 +63,7 @@ jobs:
           elif [ "${{ github.ref_name }}" == "main" ]; then
             IMAGE_TAG=ghcr.io/${{ github.repository_owner }}/powerrag:latest
           else
-            IMAGE_TAG=ghcr.io/${{ github.repository_owner }}/powerrag:${{ github.ref_name }}
+            IMAGE_TAG=ghcr.io/${{ github.repository_owner }}/powerrag:${{ github.sha }}
           fi
           echo "Commit: ${{ github.sha }} | Tag: ${IMAGE_TAG}"
           docker build \
