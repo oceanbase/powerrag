@@ -39,26 +39,27 @@ services:
       - "host.docker.internal:host-gateway"
 
   oceanbase:
-    image: oceanbase/seekdb:1.0.0.0-100000262025111218
+    image: oceanbase/oceanbase-ce:4.4.1.0-100000032025101610
     profiles:
       - oceanbase
     ports:
       - ${EXPOSE_OB_PORT:-2881}:2881
     env_file: .env
     environment:
-      - ROOT_PASSWORD=${OCEANBASE_PASSWORD:-${OB_TENANT_PASSWORD:-powerrag}}
+      - OB_CLUSTER_NAME=${OB_CLUSTER_NAME:-powerrag}
+      - OB_SERVER_IP=127.0.0.1
     volumes:
-      - ./oceanbase/data:/var/lib/oceanbase/store
-      - ./oceanbase/conf:/var/lib/oceanbase/etc
       - ./oceanbase/init.d:/root/boot/init.d
+      - ./oceanbase/data:/root/ob
+      - ./oceanbase/conf:/root/.obd/cluster
     networks:
       - powerrag
     restart: on-failure
     healthcheck:
-      test: [ 'CMD-SHELL', 'mysql -h127.0.0.1 -P2881 -uroot -p${ROOT_PASSWORD:-powerrag} -e "CREATE DATABASE IF NOT EXISTS ${OCEANBASE_META_DBNAME:-powerrag}; CREATE DATABASE IF NOT EXISTS ${OCEANBASE_DOC_DBNAME:-powerrag_doc};"' ]
-      interval: 5s
-      retries: 5
-      start_period: 10s
+      test: [ 'CMD-SHELL', 'obclient -h127.0.0.1 -P2881 -uroot@${OB_TENANT_NAME} -p${OB_TENANT_PASSWORD} -e "CREATE DATABASE IF NOT EXISTS ${OCEANBASE_META_DBNAME:-powerrag}; CREATE DATABASE IF NOT EXISTS ${OCEANBASE_DOC_DBNAME:-powerrag_doc};"' ]
+      interval: 10s
+      retries: 30
+      start_period: 30s
       timeout: 10s
 
   # Gotenberg service for document conversion
@@ -91,3 +92,4 @@ services:
 networks:
   powerrag:
     driver: bridge
+
