@@ -639,13 +639,17 @@ def split_with_title_chunks(sections, chunk_token_num=512, delimiter="\n。；�
             prev_title_level = _get_title_level(prev_extracted_title)
             
             # Merge condition: current title level <= previous title level, or current has no title (level 999)
-            if current_title_level <= prev_title_level or current_title_level == 999:
-                # Merge with previous section
+            if current_title_level >= prev_title_level or current_title_level == 999:
+                # Calculate merged content and tokens before merging
                 merged_content = prev_section + "\n\n" + section
-                # Use the previous title (higher level or existing title)
-                merged_title = prev_extracted_title if prev_title_level <= current_title_level else extracted_title
-                merged_sections[-1] = (merged_content, merged_title)
-                continue
+                merged_tokens = num_tokens_from_string(merged_content)
+                
+                # Only merge if merged tokens are less than chunk_token_num * 1.2
+                if merged_tokens < chunk_token_num * 1.2:
+                    # Use the previous title (higher level or existing title)
+                    merged_title = prev_extracted_title if prev_title_level <= current_title_level else extracted_title
+                    merged_sections[-1] = (merged_content, merged_title)
+                    continue
         
         # Don't merge, add as new section
         merged_sections.append((section, extracted_title))
