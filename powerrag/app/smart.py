@@ -20,11 +20,10 @@ import copy
 import logging
 
 from powerrag.app.pdf_parser_factory import create_pdf_parser
+from powerrag.app.gotenberg_converter import convert_office_to_pdf, convert_html_to_pdf
 from rag.nlp import rag_tokenizer
-import requests
 import io
 from rag.nlp import find_codec
-from api.utils.configs import get_base_config
 
 # 引入 server/services/split_service.py 中的智能切片方法
 from powerrag.server.services.split_service import smart_based_chunking
@@ -68,75 +67,23 @@ def chunk(filename=None, binary=None, from_page=0, to_page=100000, lang="Chinese
     
     # Handle Office files (Word, Excel, PowerPoint) - convert to PDF first
     elif re.search(r"\.(docx?|doc?|pptx?|ppt?)$", filename, re.IGNORECASE):
-        if callback:
-            callback(0.15, "Converting Office document to PDF...")
-        try:
-            # Get Gotenberg service URL from config
-            gotenberg_config = get_base_config("gotenberg", {}) or {}
-            gotenberg_url = gotenberg_config.get("url", "http://localhost:3000")
-            
-            # Convert Office document to PDF using Gotenberg
-            url = f"{gotenberg_url}/forms/libreoffice/convert"
-            files = {'files': (filename, io.BytesIO(binary) if binary else open(filename, 'rb'))}
-            
-            logging.info(f"Converting Office document to PDF via Gotenberg: {filename}")
-            response = requests.post(url, files=files, timeout=120)
-            
-            if response.status_code != 200:
-                raise Exception(f"Gotenberg conversion failed with status {response.status_code}: {response.text}")
-            
-            pdf_binary = response.content
-            logging.info(f"Successfully converted {filename} to PDF ({len(pdf_binary)} bytes)")
-            
-            # Parse the converted PDF
-            pdf_filename = os.path.splitext(filename)[0] + ".pdf"
-            pdf_parser = create_pdf_parser(pdf_filename, parser_config, tenant_id=tenant_id, lang=lang)
-            binary = pdf_binary  # Use converted PDF binary for parsing
-            
-            if callback:
-                callback(0.2, "Office document converted to PDF successfully")
-        except Exception as e:
-            error_msg = f"Failed to convert Office document to PDF: {str(e)}"
-            logging.error(error_msg)
-            if callback:
-                callback(-1, error_msg)
-            raise Exception(error_msg)
+        trace_id = kwargs.get('trace_id')
+        pdf_binary, pdf_filename = convert_office_to_pdf(
+            filename, binary=binary, callback=callback, trace_id=trace_id
+        )
+        # Parse the converted PDF
+        pdf_parser = create_pdf_parser(pdf_filename, parser_config, tenant_id=tenant_id, lang=lang)
+        binary = pdf_binary  # Use converted PDF binary for parsing
     
     # Handle HTML files - convert to PDF first
     elif re.search(r"\.(html?|htm)$", filename, re.IGNORECASE):
-        if callback:
-            callback(0.15, "Converting HTML document to PDF...")
-        try:
-            # Get Gotenberg service URL from config
-            gotenberg_config = get_base_config("gotenberg", {}) or {}
-            gotenberg_url = gotenberg_config.get("url", "http://localhost:3000")
-            
-            # Convert HTML document to PDF using Gotenberg
-            url = f"{gotenberg_url}/forms/chromium/convert/html"
-            files = {'files': (filename, io.BytesIO(binary) if binary else open(filename, 'rb'))}
-            
-            logging.info(f"Converting HTML document to PDF via Gotenberg: {filename}")
-            response = requests.post(url, files=files, timeout=120)
-            
-            if response.status_code != 200:
-                raise Exception(f"Gotenberg conversion failed with status {response.status_code}: {response.text}")
-            
-            pdf_binary = response.content
-            logging.info(f"Successfully converted {filename} to PDF ({len(pdf_binary)} bytes)")
-            
-            # Parse the converted PDF
-            pdf_filename = os.path.splitext(filename)[0] + ".pdf"
-            pdf_parser = create_pdf_parser(pdf_filename, parser_config, tenant_id=tenant_id, lang=lang)
-            binary = pdf_binary  # Use converted PDF binary for parsing
-            
-            if callback:
-                callback(0.2, "HTML document converted to PDF successfully")
-        except Exception as e:
-            error_msg = f"Failed to convert HTML document to PDF: {str(e)}"
-            logging.error(error_msg)
-            if callback:
-                callback(-1, error_msg)
-            raise Exception(error_msg)
+        trace_id = kwargs.get('trace_id')
+        pdf_binary, pdf_filename = convert_html_to_pdf(
+            filename, binary=binary, callback=callback, trace_id=trace_id
+        )
+        # Parse the converted PDF
+        pdf_parser = create_pdf_parser(pdf_filename, parser_config, tenant_id=tenant_id, lang=lang)
+        binary = pdf_binary  # Use converted PDF binary for parsing
     
     # Handle Markdown files directly
     elif re.search(r"\.(md|markdown|html?|htm|txt|csv)$", filename, re.IGNORECASE):
