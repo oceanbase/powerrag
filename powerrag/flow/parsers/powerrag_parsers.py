@@ -30,7 +30,6 @@ import logging
 from typing import Dict, Any
 from ..core.powerrag_base import PowerRAGComponentParam, PowerRAGComponent
 from powerrag.server.services.convert_service import PowerRAGConvertService
-from api.utils.configs import get_base_config
 
 logger = logging.getLogger(__name__)
 

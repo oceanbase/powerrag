@@ -27,12 +27,10 @@ import tempfile
 from pathlib import Path
 from io import BytesIO
 import pdfplumber
-from typing import Union, Dict, TypedDict, Tuple, Optional
+from typing import Union, Dict, TypedDict, Tuple
 from api.utils.configs import get_base_config
-from rag.utils.storage_factory import STORAGE_IMPL
+from common.settings import STORAGE_IMPL
 from PIL import Image
-import io
-import numpy as np
 
 LOCK_KEY_pdfplumber = "global_shared_lock_pdfplumber"
 if LOCK_KEY_pdfplumber not in sys.modules:

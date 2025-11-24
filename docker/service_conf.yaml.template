@@ -46,6 +46,11 @@ mineru:
   # 如果不配置此项，将自动降级到本地 mineru CLI（需要通过 pip install -U 'mineru[core]' 安装）
 dots_ocr:
   vllm_url: '${DOTS_OCR_URL}'  # Dots OCR vLLM service URL
+user_default_llm:
+  default_models:
+    embedding_model:
+      api_key: 'xxx'
+      base_url: 'http://${TEI_HOST}:80'
 # postgres:
 #   name: '${POSTGRES_DBNAME:-rag_flow}'
 #   user: '${POSTGRES_USER:-rag_flow}'
@@ -147,3 +152,9 @@ dots_ocr:
 #     - "RAGFlow" # display name
 #     - "" # sender email address
 #   mail_frontend_url: "https://your-frontend.example.com"
+# tcadp_config:
+#   secret_id: '${TENCENT_SECRET_ID}'
+#   secret_key: '${TENCENT_SECRET_KEY}'
+#   region: '${TENCENT_REGION}'
+#   table_result_type: '1'
+#   markdown_image_response_type: '1'

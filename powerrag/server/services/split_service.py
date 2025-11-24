@@ -29,7 +29,7 @@ from markdown_it import MarkdownIt
 from markdown_it.tree import SyntaxTreeNode
 from numpy.f2py.auxfuncs import throw_error
 
-from api.db import ParserType
+from common.constants import ParserType
 from powerrag.utils.nlp_utils import num_tokens_from_string
 
 logger = logging.getLogger(__name__)

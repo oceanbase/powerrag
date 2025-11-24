@@ -3,8 +3,8 @@ import logging
 import pymysql
 from urllib.parse import quote_plus
 
-from api.utils.configs import get_base_config
-from rag.utils import singleton
+from common.config_utils import get_base_config
+from common.decorator import singleton
 
 
 CREATE_TABLE_SQL = """
@@ -62,8 +62,7 @@ class OpenDALStorage:
 
     def health(self):
         bucket, fnm, binary = "txtxtxtxt1", "txtxtxtxt1", b"_t@@@1"
-        r = self._operator.write(f"{bucket}/{fnm}", binary)
-        return r
+        return self._operator.write(f"{bucket}/{fnm}", binary)
 
     def put(self, bucket, fnm, binary, tenant_id=None):
         self._operator.write(f"{bucket}/{fnm}", binary)

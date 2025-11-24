@@ -34,13 +34,13 @@ from huggingface_hub import snapshot_download
 from PIL import Image
 from pypdf import PdfReader as pdf2_read
 
-from api import settings
-from api.utils.file_utils import get_project_base_directory
+from common.file_utils import get_project_base_directory
+from common.misc_utils import pip_install_torch
 from deepdoc.vision import OCR, AscendLayoutRecognizer, LayoutRecognizer, Recognizer, TableStructureRecognizer
 from rag.app.picture import vision_llm_chunk as picture_vision_llm_chunk
 from rag.nlp import rag_tokenizer
 from rag.prompts.generator import vision_llm_describe_prompt
-from rag.settings import PARALLEL_DEVICES
+from common import settings
 
 LOCK_KEY_pdfplumber = "global_shared_lock_pdfplumber"
 if LOCK_KEY_pdfplumber not in sys.modules:
@@ -63,8 +63,8 @@ class RAGFlowPdfParser:
 
         self.ocr = OCR()
         self.parallel_limiter = None
-        if PARALLEL_DEVICES > 1:
-            self.parallel_limiter = [trio.CapacityLimiter(1) for _ in range(PARALLEL_DEVICES)]
+        if settings.PARALLEL_DEVICES > 1:
+            self.parallel_limiter = [trio.CapacityLimiter(1) for _ in range(settings.PARALLEL_DEVICES)]
 
         layout_recognizer_type = os.getenv("LAYOUT_RECOGNIZER_TYPE", "onnx").lower()
         if layout_recognizer_type not in ["onnx", "ascend"]:
@@ -84,14 +84,13 @@ class RAGFlowPdfParser:
         self.tbl_det = TableStructureRecognizer()
 
         self.updown_cnt_mdl = xgb.Booster()
-        if not settings.LIGHTEN:
-            try:
-                import torch.cuda
-
-                if torch.cuda.is_available():
-                    self.updown_cnt_mdl.set_param({"device": "cuda"})
-            except Exception:
-                logging.exception("RAGFlowPdfParser __init__")
+        try:
+            pip_install_torch()
+            import torch.cuda
+            if torch.cuda.is_available():
+                self.updown_cnt_mdl.set_param({"device": "cuda"})
+        except Exception:
+            logging.info("No torch found.")
         try:
             model_dir = os.path.join(get_project_base_directory(), "rag/res/deepdoc")
             self.updown_cnt_mdl.load_model(os.path.join(model_dir, "updown_concat_xgb.model"))
@@ -1114,7 +1113,7 @@ class RAGFlowPdfParser:
                     for i, img in enumerate(self.page_images):
                         chars = __ocr_preprocess()
 
-                        nursery.start_soon(__img_ocr, i, i % PARALLEL_DEVICES, img, chars, self.parallel_limiter[i % PARALLEL_DEVICES])
+                        nursery.start_soon(__img_ocr, i, i % settings.PARALLEL_DEVICES, img, chars, self.parallel_limiter[i % settings.PARALLEL_DEVICES])
                         await trio.sleep(0.1)
             else:
                 for i, img in enumerate(self.page_images):
@@ -1131,7 +1130,7 @@ class RAGFlowPdfParser:
             bxes = [b for bxs in self.boxes for b in bxs]
             self.is_english = re.search(r"[\na-zA-Z0-9,/¸;:'\[\]\(\)!@#$%^&*\"?<>._-]{30,}", "".join([b["text"] for b in random.choices(bxes, k=min(30, len(bxes)))]))
 
-        logging.debug("Is it English:", self.is_english)
+        logging.debug(f"Is it English: {self.is_english}")
 
         self.page_cum_height = np.cumsum(self.page_cum_height)
         assert len(self.page_cum_height) == len(self.page_images) + 1
@@ -1253,24 +1252,77 @@ class RAGFlowPdfParser:
                 return None, None
             return
 
+        if not getattr(self, "page_images", None):
+            logging.warning("crop called without page images; skipping image generation.")
+            if need_position:
+                return None, None
+            return
+
+        page_count = len(self.page_images)
+
+        filtered_poss = []
+        for pns, left, right, top, bottom in poss:
+            if not pns:
+                logging.warning("Empty page index list in crop; skipping this position.")
+                continue
+            valid_pns = [p for p in pns if 0 <= p < page_count]
+            if not valid_pns:
+                logging.warning(f"All page indices {pns} out of range for {page_count} pages; skipping.")
+                continue
+            filtered_poss.append((valid_pns, left, right, top, bottom))
+
+        poss = filtered_poss
+        if not poss:
+            logging.warning("No valid positions after filtering; skip cropping.")
+            if need_position:
+                return None, None
+            return
+
         max_width = max(np.max([right - left for (_, left, right, _, _) in poss]), 6)
         GAP = 6
         pos = poss[0]
-        poss.insert(0, ([pos[0][0]], pos[1], pos[2], max(0, pos[3] - 120), max(pos[3] - GAP, 0)))
+        first_page_idx = pos[0][0]
+        poss.insert(0, ([first_page_idx], pos[1], pos[2], max(0, pos[3] - 120), max(pos[3] - GAP, 0)))
         pos = poss[-1]
-        poss.append(([pos[0][-1]], pos[1], pos[2], min(self.page_images[pos[0][-1]].size[1] / ZM, pos[4] + GAP), min(self.page_images[pos[0][-1]].size[1] / ZM, pos[4] + 120)))
+        last_page_idx = pos[0][-1]
+        if not (0 <= last_page_idx < page_count):
+            logging.warning(f"Last page index {last_page_idx} out of range for {page_count} pages; skipping crop.")
+            if need_position:
+                return None, None
+            return
+        last_page_height = self.page_images[last_page_idx].size[1] / ZM
+        poss.append(
+            (
+                [last_page_idx],
+                pos[1],
+                pos[2],
+                min(last_page_height, pos[4] + GAP),
+                min(last_page_height, pos[4] + 120),
+            )
+        )
 
         positions = []
         for ii, (pns, left, right, top, bottom) in enumerate(poss):
             right = left + max_width
             bottom *= ZM
             for pn in pns[1:]:
-                bottom += self.page_images[pn - 1].size[1]
+                if 0 <= pn - 1 < page_count:
+                    bottom += self.page_images[pn - 1].size[1]
+                else:
+                    logging.warning(f"Page index {pn}-1 out of range for {page_count} pages during crop; skipping height accumulation.")
+
+            if not (0 <= pns[0] < page_count):
+                logging.warning(f"Base page index {pns[0]} out of range for {page_count} pages during crop; skipping this segment.")
+                continue
+
             imgs.append(self.page_images[pns[0]].crop((left * ZM, top * ZM, right * ZM, min(bottom, self.page_images[pns[0]].size[1]))))
             if 0 < ii < len(poss) - 1:
                 positions.append((pns[0] + self.page_from, left, right, top, min(bottom, self.page_images[pns[0]].size[1]) / ZM))
             bottom -= self.page_images[pns[0]].size[1]
             for pn in pns[1:]:
+                if not (0 <= pn < page_count):
+                    logging.warning(f"Page index {pn} out of range for {page_count} pages during crop; skipping this page.")
+                    continue
                 imgs.append(self.page_images[pn].crop((left * ZM, 0, right * ZM, min(bottom, self.page_images[pn].size[1]))))
                 if 0 < ii < len(poss) - 1:
                     positions.append((pn + self.page_from, left, right, 0, min(bottom, self.page_images[pn].size[1]) / ZM))

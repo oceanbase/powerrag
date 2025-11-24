@@ -21,7 +21,7 @@ import json
 from flask import Flask
 from flask.json.provider import DefaultJSONProvider
 from flask_cors import CORS
-from api.utils.json import CustomJSONEncoder
+from api.utils.json_encode import CustomJSONEncoder
 
 logger = logging.getLogger(__name__)
 

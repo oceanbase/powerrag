@@ -14,15 +14,12 @@
 #  limitations under the License.
 #
 
-import os
 import re
 import logging
 
 from powerrag.app.pdf_parser_factory import create_pdf_parser
 from powerrag.app.gotenberg_converter import convert_office_to_pdf, convert_html_to_pdf
 from rag.nlp import rag_tokenizer
-from api.db.services.llm_service import LLMBundle
-from api.db import LLMType
 from PIL import Image
 import io
 from rag.nlp import find_codec

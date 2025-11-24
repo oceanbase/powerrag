@@ -10,7 +10,7 @@ import trio
 from peewee import IntegrityError, ProgrammingError
 
 from api.db.db_models import RetryingPooledMySQLDatabase
-from api.utils.configs import decrypt_database_config
+from common.config_utils import decrypt_database_config
 from rag.utils.redis_able import RedisAble
 
 DATABASE = None

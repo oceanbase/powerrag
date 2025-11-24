@@ -1,4 +1,6 @@
 import {
+  DSL,
+  GlobalVariableType,
   IAgentForm,
   ICategorizeForm,
   ICategorizeItem,
@@ -29,6 +31,7 @@ import {
   NodeHandleId,
   Operator,
 } from './constant';
+import { DataOperationsFormSchemaType } from './form/data-operations-form';
 import { ExtractorFormSchemaType } from './form/extractor-form';
 import { HierarchicalMergerFormSchemaType } from './form/hierarchical-merger-form';
 import { ParserFormSchemaType } from './form/parser-form';
@@ -78,10 +81,7 @@ const buildComponentDownstreamOrUpstream = (
 
 const removeUselessDataInTheOperator = curry(
   (operatorName: string, params: Record<string, unknown>) => {
-    if (
-      operatorName === Operator.Generate ||
-      operatorName === Operator.Categorize
-    ) {
+    if (operatorName === Operator.Categorize) {
       return removeUselessFieldsFromValues(params, '');
     }
     return params;
@@ -270,6 +270,15 @@ function transformExtractorParams(params: ExtractorFormSchemaType) {
   return { ...params, prompts: [{ content: params.prompts, role: 'user' }] };
 }
 
+function transformDataOperationsParams(params: DataOperationsFormSchemaType) {
+  return {
+    ...params,
+    select_keys: params?.select_keys?.map((x) => x.name),
+    remove_keys: params?.remove_keys?.map((x) => x.name),
+    query: params.query.map((x) => x.input),
+  };
+}
+
 // construct a dsl based on the node information of the graph
 export const buildDslComponentsByGraph = (
   nodes: RAGFlowNodeType[],
@@ -316,7 +325,9 @@ export const buildDslComponentsByGraph = (
         case Operator.Extractor:
           params = transformExtractorParams(params);
           break;
-
+        case Operator.DataOperations:
+          params = transformDataOperationsParams(params);
+          break;
         default:
           break;
       }
@@ -334,6 +345,32 @@ export const buildDslComponentsByGraph = (
     });
 
   return components;
+};
+
+export const buildDslGlobalVariables = (
+  dsl: DSL,
+  globalVariables?: Record<string, GlobalVariableType>,
+) => {
+  if (!globalVariables) {
+    return { globals: dsl.globals, variables: dsl.variables || {} };
+  }
+
+  let globalVariablesTemp: Record<string, any> = {};
+  let globalSystem: Record<string, any> = {};
+  Object.keys(dsl.globals)?.forEach((key) => {
+    if (key.indexOf('sys') > -1) {
+      globalSystem[key] = dsl.globals[key];
+    }
+  });
+  Object.keys(globalVariables).forEach((key) => {
+    globalVariablesTemp['env.' + key] = globalVariables[key].value;
+  });
+
+  const globalVariablesResult = {
+    ...globalSystem,
+    ...globalVariablesTemp,
+  };
+  return { globals: globalVariablesResult, variables: globalVariables };
 };
 
 export const receiveMessageError = (res: any) =>
@@ -694,4 +731,8 @@ export function buildBeginQueryWithObject(
   );
 
   return nextInputs;
+}
+
+export function getArrayElementType(type: string) {
+  return typeof type === 'string' ? type.match(/<([^>]+)>/)?.at(1) ?? '' : '';
 }

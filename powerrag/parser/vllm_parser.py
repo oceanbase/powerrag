@@ -24,7 +24,7 @@ from io import BytesIO
 import pdfplumber
 from typing import Union, Dict, TypedDict, Tuple, List, Optional
 from api.utils.configs import get_base_config
-from rag.utils.storage_factory import STORAGE_IMPL
+from common.settings import STORAGE_IMPL
 from openai import OpenAI
 from PIL import Image
 import io

@@ -24,14 +24,15 @@ import copy
 from elasticsearch import Elasticsearch, NotFoundError
 from elasticsearch_dsl import UpdateByQuery, Q, Search, Index
 from elastic_transport import ConnectionTimeout
-from rag import settings
-from rag.settings import TAG_FLD, PAGERANK_FLD
-from rag.utils import singleton, get_float
-from api.utils.file_utils import get_project_base_directory
-from api.utils.common import convert_bytes
+from common.decorator import singleton
+from common.file_utils import get_project_base_directory
+from common.misc_utils import convert_bytes
 from rag.utils.doc_store_conn import DocStoreConnection, MatchExpr, OrderByExpr, MatchTextExpr, MatchDenseExpr, \
     FusionExpr
 from rag.nlp import is_english, rag_tokenizer
+from common.float_utils import get_float
+from common import settings
+from common.constants import PAGERANK_FLD, TAG_FLD
 
 ATTEMPT_TIME = 2
 
@@ -74,9 +75,8 @@ class ESConnection(DocStoreConnection):
             settings.ES["hosts"].split(","),
             basic_auth=(settings.ES["username"], settings.ES[
                 "password"]) if "username" in settings.ES and "password" in settings.ES else None,
-            verify_certs=False,
-            timeout=600
-        )
+            verify_certs= settings.ES.get("verify_certs", False),
+            timeout=600 )
         if self.es:
             self.info = self.es.info()
             return True
@@ -471,12 +471,12 @@ class ESConnection(DocStoreConnection):
     Helper functions for search result
     """
 
-    def getTotal(self, res):
+    def get_total(self, res):
         if isinstance(res["hits"]["total"], type({})):
             return res["hits"]["total"]["value"]
         return res["hits"]["total"]
 
-    def getChunkIds(self, res):
+    def get_chunk_ids(self, res):
         return [d["_id"] for d in res["hits"]["hits"]]
 
     def __getSource(self, res):
@@ -487,7 +487,7 @@ class ESConnection(DocStoreConnection):
             rr.append(d["_source"])
         return rr
 
-    def getFields(self, res, fields: list[str]) -> dict[str, dict]:
+    def get_fields(self, res, fields: list[str]) -> dict[str, dict]:
         res_fields = {}
         if not fields:
             return {}
@@ -503,13 +503,13 @@ class ESConnection(DocStoreConnection):
                 if not isinstance(v, str):
                     m[n] = str(m[n])
                 # if n.find("tks") > 0:
-                #     m[n] = rmSpace(m[n])
+                #     m[n] = remove_redundant_spaces(m[n])
 
             if m:
                 res_fields[d["id"]] = m
         return res_fields
 
-    def getHighlight(self, res, keywords: list[str], fieldnm: str):
+    def get_highlight(self, res, keywords: list[str], fieldnm: str):
         ans = {}
         for d in res["hits"]["hits"]:
             hlts = d.get("highlight")
@@ -534,7 +534,7 @@ class ESConnection(DocStoreConnection):
 
         return ans
 
-    def getAggregation(self, res, fieldnm: str):
+    def get_aggregation(self, res, fieldnm: str):
         agg_field = "aggs_" + fieldnm
         if "aggregations" not in res or agg_field not in res["aggregations"]:
             return list()

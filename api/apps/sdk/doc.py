@@ -20,13 +20,12 @@ import re
 from io import BytesIO
 
 import xxhash
-from flask import request, send_file
+from quart import request, send_file
 from peewee import OperationalError
 from pydantic import BaseModel, Field, validator
 
-from api import settings
 from api.constants import FILE_NAME_LEN_LIMIT
-from api.db import FileSource, FileType, LLMType, ParserType, TaskStatus
+from api.db import FileType
 from api.db.db_models import File, Task
 from api.db.services.document_service import DocumentService
 from api.db.services.file2document_service import File2DocumentService
@@ -36,13 +35,15 @@ from api.db.services.llm_service import LLMBundle
 from api.db.services.tenant_llm_service import TenantLLMService
 from api.db.services.task_service import TaskService, queue_tasks
 from api.db.services.dialog_service import meta_filter, convert_conditions
-from api.utils.api_utils import check_duplicate_ids, construct_json_result, get_error_data_result, get_parser_config, get_result, server_error_response, token_required
+from api.utils.api_utils import check_duplicate_ids, construct_json_result, get_error_data_result, get_parser_config, get_result, server_error_response, token_required, \
+    request_json
 from rag.app.qa import beAdoc, rmPrefix
 from rag.app.tag import label_question
 from rag.nlp import rag_tokenizer, search
 from rag.prompts.generator import cross_languages, keyword_extraction
-from rag.utils import rmSpace
-from rag.utils.storage_factory import STORAGE_IMPL
+from common.string_utils import remove_redundant_spaces
+from common.constants import RetCode, LLMType, ParserType, TaskStatus, FileSource
+from common import settings
 
 MAXIMUM_OF_UPLOADING_FILES = 256
 
@@ -69,7 +70,7 @@ class Chunk(BaseModel):
 
 @manager.route("/datasets/<dataset_id>/documents", methods=["POST"])  # noqa: F821
 @token_required
-def upload(dataset_id, tenant_id):
+async def upload(dataset_id, tenant_id):
     """
     Upload documents to a dataset.
     ---
@@ -93,6 +94,10 @@ def upload(dataset_id, tenant_id):
         type: file
         required: true
         description: Document files to upload.
+      - in: formData
+        name: parent_path
+        type: string
+        description: Optional nested path under the parent folder. Uses '/' separators.
     responses:
       200:
         description: Successfully uploaded documents.
@@ -126,14 +131,16 @@ def upload(dataset_id, tenant_id):
                     type: string
                     description: Processing status.
     """
-    if "file" not in request.files:
-        return get_error_data_result(message="No file part!", code=settings.RetCode.ARGUMENT_ERROR)
-    file_objs = request.files.getlist("file")
+    form = await request.form
+    files = await request.files
+    if "file" not in files:
+        return get_error_data_result(message="No file part!", code=RetCode.ARGUMENT_ERROR)
+    file_objs = files.getlist("file")
     for file_obj in file_objs:
         if file_obj.filename == "":
-            return get_result(message="No file selected!", code=settings.RetCode.ARGUMENT_ERROR)
+            return get_result(message="No file selected!", code=RetCode.ARGUMENT_ERROR)
         if len(file_obj.filename.encode("utf-8")) > FILE_NAME_LEN_LIMIT:
-            return get_result(message=f"File name must be {FILE_NAME_LEN_LIMIT} bytes or less.", code=settings.RetCode.ARGUMENT_ERROR)
+            return get_result(message=f"File name must be {FILE_NAME_LEN_LIMIT} bytes or less.", code=RetCode.ARGUMENT_ERROR)
     """
     # total size
     total_size = 0
@@ -145,15 +152,15 @@ def upload(dataset_id, tenant_id):
     if total_size > MAX_TOTAL_FILE_SIZE:
         return get_result(
             message=f"Total file size exceeds 10MB limit! ({total_size / (1024 * 1024):.2f} MB)",
-            code=settings.RetCode.ARGUMENT_ERROR,
+            code=RetCode.ARGUMENT_ERROR,
         )
     """
     e, kb = KnowledgebaseService.get_by_id(dataset_id)
     if not e:
         raise LookupError(f"Can't find the dataset with ID {dataset_id}!")
-    err, files = FileService.upload_document(kb, file_objs, tenant_id)
+    err, files = FileService.upload_document(kb, file_objs, tenant_id, parent_path=form.get("parent_path"))
     if err:
-        return get_result(message="\n".join(err), code=settings.RetCode.SERVER_ERROR)
+        return get_result(message="\n".join(err), code=RetCode.SERVER_ERROR)
     # rename key's name
     renamed_doc_list = []
     for file in files:
@@ -175,7 +182,7 @@ def upload(dataset_id, tenant_id):
 
 @manager.route("/datasets/<dataset_id>/documents/<document_id>", methods=["PUT"])  # noqa: F821
 @token_required
-def update_doc(tenant_id, dataset_id, document_id):
+async def update_doc(tenant_id, dataset_id, document_id):
     """
     Update a document within a dataset.
     ---
@@ -224,7 +231,7 @@ def update_doc(tenant_id, dataset_id, document_id):
         schema:
           type: object
     """
-    req = request.json
+    req = await request_json()
     if not KnowledgebaseService.query(id=dataset_id, tenant_id=tenant_id):
         return get_error_data_result(message="You don't own the dataset.")
     e, kb = KnowledgebaseService.get_by_id(dataset_id)
@@ -253,12 +260,12 @@ def update_doc(tenant_id, dataset_id, document_id):
         if len(req["name"].encode("utf-8")) > FILE_NAME_LEN_LIMIT:
             return get_result(
                 message=f"File name must be {FILE_NAME_LEN_LIMIT} bytes or less.",
-                code=settings.RetCode.ARGUMENT_ERROR,
+                code=RetCode.ARGUMENT_ERROR,
             )
         if pathlib.Path(req["name"].lower()).suffix != pathlib.Path(doc.name.lower()).suffix:
             return get_result(
                 message="The extension of file can't be changed",
-                code=settings.RetCode.ARGUMENT_ERROR,
+                code=RetCode.ARGUMENT_ERROR,
             )
         for d in DocumentService.query(name=req["name"], kb_id=doc.kb_id):
             if d.name == req["name"]:
@@ -355,7 +362,7 @@ def update_doc(tenant_id, dataset_id, document_id):
 
 @manager.route("/datasets/<dataset_id>/documents/<document_id>", methods=["GET"])  # noqa: F821
 @token_required
-def download(tenant_id, dataset_id, document_id):
+async def download(tenant_id, dataset_id, document_id):
     """
     Download a document from a dataset.
     ---
@@ -400,15 +407,15 @@ def download(tenant_id, dataset_id, document_id):
         return get_error_data_result(message=f"The dataset not own the document {document_id}.")
     # The process of downloading
     doc_id, doc_location = File2DocumentService.get_storage_address(doc_id=document_id)  # minio address
-    file_stream = STORAGE_IMPL.get(doc_id, doc_location)
+    file_stream = settings.STORAGE_IMPL.get(doc_id, doc_location)
     if not file_stream:
-        return construct_json_result(message="This file is empty.", code=settings.RetCode.DATA_ERROR)
+        return construct_json_result(message="This file is empty.", code=RetCode.DATA_ERROR)
     file = BytesIO(file_stream)
     # Use send_file with a proper filename and MIME type
-    return send_file(
+    return await send_file(
         file,
         as_attachment=True,
-        download_name=doc[0].name,
+        attachment_filename=doc[0].name,
         mimetype="application/octet-stream",  # Set a default MIME type
     )
 
@@ -585,7 +592,7 @@ def list_docs(dataset_id, tenant_id):
 
 @manager.route("/datasets/<dataset_id>/documents", methods=["DELETE"])  # noqa: F821
 @token_required
-def delete(tenant_id, dataset_id):
+async def delete(tenant_id, dataset_id):
     """
     Delete documents from a dataset.
     ---
@@ -624,7 +631,7 @@ def delete(tenant_id, dataset_id):
     """
     if not KnowledgebaseService.accessible(kb_id=dataset_id, user_id=tenant_id):
         return get_error_data_result(message=f"You don't own the dataset {dataset_id}. ")
-    req = request.json
+    req = await request_json()
     if not req:
         doc_ids = None
     else:
@@ -670,16 +677,16 @@ def delete(tenant_id, dataset_id):
             )
             File2DocumentService.delete_by_document_id(doc_id)
 
-            STORAGE_IMPL.rm(b, n)
+            settings.STORAGE_IMPL.rm(b, n)
             success_count += 1
         except Exception as e:
             errors += str(e)
 
     if not_found:
-        return get_result(message=f"Documents not found: {not_found}", code=settings.RetCode.DATA_ERROR)
+        return get_result(message=f"Documents not found: {not_found}", code=RetCode.DATA_ERROR)
 
     if errors:
-        return get_result(message=errors, code=settings.RetCode.SERVER_ERROR)
+        return get_result(message=errors, code=RetCode.SERVER_ERROR)
 
     if duplicate_messages:
         if success_count > 0:
@@ -695,7 +702,7 @@ def delete(tenant_id, dataset_id):
 
 @manager.route("/datasets/<dataset_id>/chunks", methods=["POST"])  # noqa: F821
 @token_required
-def parse(tenant_id, dataset_id):
+async def parse(tenant_id, dataset_id):
     """
     Start parsing documents into chunks.
     ---
@@ -734,7 +741,7 @@ def parse(tenant_id, dataset_id):
     """
     if not KnowledgebaseService.accessible(kb_id=dataset_id, user_id=tenant_id):
         return get_error_data_result(message=f"You don't own the dataset {dataset_id}.")
-    req = request.json
+    req = await request_json()
     if not req.get("document_ids"):
         return get_error_data_result("`document_ids` is required")
     doc_list = req.get("document_ids")
@@ -763,7 +770,7 @@ def parse(tenant_id, dataset_id):
         queue_tasks(doc, bucket, name, 0)
         success_count += 1
     if not_found:
-        return get_result(message=f"Documents not found: {not_found}", code=settings.RetCode.DATA_ERROR)
+        return get_result(message=f"Documents not found: {not_found}", code=RetCode.DATA_ERROR)
     if duplicate_messages:
         if success_count > 0:
             return get_result(
@@ -778,7 +785,7 @@ def parse(tenant_id, dataset_id):
 
 @manager.route("/datasets/<dataset_id>/chunks", methods=["DELETE"])  # noqa: F821
 @token_required
-def stop_parsing(tenant_id, dataset_id):
+async def stop_parsing(tenant_id, dataset_id):
     """
     Stop parsing documents into chunks.
     ---
@@ -817,7 +824,7 @@ def stop_parsing(tenant_id, dataset_id):
     """
     if not KnowledgebaseService.accessible(kb_id=dataset_id, user_id=tenant_id):
         return get_error_data_result(message=f"You don't own the dataset {dataset_id}.")
-    req = request.json
+    req = await request_json()
 
     if not req.get("document_ids"):
         return get_error_data_result("`document_ids` is required")
@@ -969,7 +976,7 @@ def list_chunks(tenant_id, dataset_id, document_id):
     if req.get("id"):
         chunk = settings.docStoreConn.get(req.get("id"), search.index_name(tenant_id), [dataset_id])
         if not chunk:
-            return get_result(message=f"Chunk not found: {dataset_id}/{req.get('id')}", code=settings.RetCode.NOT_FOUND)
+            return get_result(message=f"Chunk not found: {dataset_id}/{req.get('id')}", code=RetCode.NOT_FOUND)
         k = []
         for n in chunk.keys():
             if re.search(r"(_vec$|_sm_|_tks|_ltks)", n):
@@ -1000,7 +1007,7 @@ def list_chunks(tenant_id, dataset_id, document_id):
         for id in sres.ids:
             d = {
                 "id": id,
-                "content": (rmSpace(sres.highlight[id]) if question and id in sres.highlight else sres.field[id].get("content_with_weight", "")),
+                "content": (remove_redundant_spaces(sres.highlight[id]) if question and id in sres.highlight else sres.field[id].get("content_with_weight", "")),
                 "document_id": sres.field[id]["doc_id"],
                 "docnm_kwd": sres.field[id]["docnm_kwd"],
                 "important_keywords": sres.field[id].get("important_kwd", []),
@@ -1019,7 +1026,7 @@ def list_chunks(tenant_id, dataset_id, document_id):
     "/datasets/<dataset_id>/documents/<document_id>/chunks", methods=["POST"]
 )
 @token_required
-def add_chunk(tenant_id, dataset_id, document_id):
+async def add_chunk(tenant_id, dataset_id, document_id):
     """
     Add a chunk to a document.
     ---
@@ -1089,7 +1096,7 @@ def add_chunk(tenant_id, dataset_id, document_id):
     if not doc:
         return get_error_data_result(message=f"You don't own the document {document_id}.")
     doc = doc[0]
-    req = request.json
+    req = await request_json()
     if not str(req.get("content", "")).strip():
         return get_error_data_result(message="`content` is required")
     if "important_keywords" in req:
@@ -1148,7 +1155,7 @@ def add_chunk(tenant_id, dataset_id, document_id):
     "datasets/<dataset_id>/documents/<document_id>/chunks", methods=["DELETE"]
 )
 @token_required
-def rm_chunk(tenant_id, dataset_id, document_id):
+async def rm_chunk(tenant_id, dataset_id, document_id):
     """
     Remove chunks from a document.
     ---
@@ -1195,7 +1202,7 @@ def rm_chunk(tenant_id, dataset_id, document_id):
     docs = DocumentService.get_by_ids([document_id])
     if not docs:
         raise LookupError(f"Can't find the document with ID {document_id}!")
-    req = request.json
+    req = await request_json()
     condition = {"doc_id": document_id}
     if "chunk_ids" in req:
         unique_chunk_ids, duplicate_messages = check_duplicate_ids(req["chunk_ids"], "chunk")
@@ -1219,7 +1226,7 @@ def rm_chunk(tenant_id, dataset_id, document_id):
     "/datasets/<dataset_id>/documents/<document_id>/chunks/<chunk_id>", methods=["PUT"]
 )
 @token_required
-def update_chunk(tenant_id, dataset_id, document_id, chunk_id):
+async def update_chunk(tenant_id, dataset_id, document_id, chunk_id):
     """
     Update a chunk within a document.
     ---
@@ -1281,7 +1288,7 @@ def update_chunk(tenant_id, dataset_id, document_id, chunk_id):
     if not doc:
         return get_error_data_result(message=f"You don't own the document {document_id}.")
     doc = doc[0]
-    req = request.json
+    req = await request_json()
     if "content" in req:
         content = req["content"]
     else:
@@ -1301,6 +1308,10 @@ def update_chunk(tenant_id, dataset_id, document_id, chunk_id):
         d["question_tks"] = rag_tokenizer.tokenize("\n".join(req["questions"]))
     if "available" in req:
         d["available_int"] = int(req["available"])
+    if "positions" in req:
+        if not isinstance(req["positions"], list):
+            return get_error_data_result("`positions` should be a list")
+        d["position_int"] = req["positions"]
     embd_id = DocumentService.get_embd_id(document_id)
     embd_mdl = TenantLLMService.model_instance(tenant_id, LLMType.EMBEDDING.value, embd_id)
     if doc.parser_id == ParserType.QA:
@@ -1319,7 +1330,7 @@ def update_chunk(tenant_id, dataset_id, document_id, chunk_id):
 
 @manager.route("/retrieval", methods=["POST"])  # noqa: F821
 @token_required
-def retrieval_test(tenant_id):
+async def retrieval_test(tenant_id):
     """
     Retrieve chunks based on a query.
     ---
@@ -1400,7 +1411,7 @@ def retrieval_test(tenant_id):
                     format: float
                     description: Similarity score.
     """
-    req = request.json
+    req = await request_json()
     if not req.get("dataset_ids"):
         return get_error_data_result("`dataset_ids` is required.")
     kb_ids = req["dataset_ids"]
@@ -1414,7 +1425,7 @@ def retrieval_test(tenant_id):
     if len(embd_nms) != 1:
         return get_result(
             message='Datasets use different embedding models."',
-            code=settings.RetCode.DATA_ERROR,
+            code=RetCode.DATA_ERROR,
         )
     if "question" not in req:
         return get_error_data_result("`question` is required.")
@@ -1505,6 +1516,6 @@ def retrieval_test(tenant_id):
         if str(e).find("not_found") > 0:
             return get_result(
                 message="No chunk found! Check the chunk status please!",
-                code=settings.RetCode.DATA_ERROR,
+                code=RetCode.DATA_ERROR,
             )
         return server_error_response(e)

@@ -16,13 +16,14 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pytest
-from common import create_dataset
-from configs import DATASET_NAME_LIMIT, INVALID_API_TOKEN
+from configs import DATASET_NAME_LIMIT, DEFAULT_PARSER_CONFIG, INVALID_API_TOKEN
 from hypothesis import example, given, settings
 from libs.auth import RAGFlowHttpApiAuth
 from utils import encode_avatar
 from utils.file_utils import create_image_file
 from utils.hypothesis_utils import valid_names
+
+from common import create_dataset
 
 
 @pytest.mark.usefixtures("clear_datasets")
@@ -125,8 +126,8 @@ class TestDatasetCreate:
         assert res["code"] == 0, res
 
         res = create_dataset(HttpApiAuth, payload)
-        assert res["code"] == 103, res
-        assert res["message"] == f"Dataset name '{name}' already exists", res
+        assert res["code"] == 0, res
+        assert res["data"]["name"] == name + "(1)", res
 
     @pytest.mark.p3
     def test_name_case_insensitive(self, HttpApiAuth):
@@ -137,8 +138,8 @@ class TestDatasetCreate:
 
         payload = {"name": name.lower()}
         res = create_dataset(HttpApiAuth, payload)
-        assert res["code"] == 103, res
-        assert res["message"] == f"Dataset name '{name.lower()}' already exists", res
+        assert res["code"] == 0, res
+        assert res["data"]["name"] == name.lower() + "(1)", res
 
     @pytest.mark.p2
     def test_avatar(self, HttpApiAuth, tmp_path):
@@ -224,11 +225,10 @@ class TestDatasetCreate:
     @pytest.mark.parametrize(
         "name, embedding_model",
         [
-            ("BAAI/bge-large-zh-v1.5@BAAI", "BAAI/bge-large-zh-v1.5@BAAI"),
-            ("maidalun1020/bce-embedding-base_v1@Youdao", "maidalun1020/bce-embedding-base_v1@Youdao"),
+            ("BAAI/bge-small-en-v1.5@Builtin", "BAAI/bge-small-en-v1.5@Builtin"),
             ("embedding-3@ZHIPU-AI", "embedding-3@ZHIPU-AI"),
         ],
-        ids=["builtin_baai", "builtin_youdao", "tenant_zhipu"],
+        ids=["builtin_baai", "tenant_zhipu"],
     )
     def test_embedding_model(self, HttpApiAuth, name, embedding_model):
         payload = {"name": name, "embedding_model": embedding_model}
@@ -262,11 +262,11 @@ class TestDatasetCreate:
         [
             ("empty", ""),
             ("space", " "),
-            ("missing_at", "BAAI/bge-large-zh-v1.5BAAI"),
-            ("missing_model_name", "@BAAI"),
-            ("missing_provider", "BAAI/bge-large-zh-v1.5@"),
-            ("whitespace_only_model_name", " @BAAI"),
-            ("whitespace_only_provider", "BAAI/bge-large-zh-v1.5@ "),
+            ("missing_at", "BAAI/bge-small-en-v1.5Builtin"),
+            ("missing_model_name", "@Builtin"),
+            ("missing_provider", "BAAI/bge-small-en-v1.5@"),
+            ("whitespace_only_model_name", " @Builtin"),
+            ("whitespace_only_provider", "BAAI/bge-small-env1.5@ "),
         ],
         ids=["empty", "space", "missing_at", "empty_model_name", "empty_provider", "whitespace_only_model_name", "whitespace_only_provider"],
     )
@@ -284,14 +284,14 @@ class TestDatasetCreate:
         payload = {"name": "embedding_model_unset"}
         res = create_dataset(HttpApiAuth, payload)
         assert res["code"] == 0, res
-        assert res["data"]["embedding_model"] == "BAAI/bge-large-zh-v1.5@BAAI", res
+        assert res["data"]["embedding_model"] == "BAAI/bge-small-en-v1.5@Builtin", res
 
     @pytest.mark.p2
     def test_embedding_model_none(self, HttpApiAuth):
         payload = {"name": "embedding_model_none", "embedding_model": None}
         res = create_dataset(HttpApiAuth, payload)
         assert res["code"] == 0, res
-        assert res["data"]["embedding_model"] == "BAAI/bge-large-zh-v1.5@BAAI", res
+        assert res["data"]["embedding_model"] == "BAAI/bge-small-en-v1.5@Builtin", res
 
     @pytest.mark.p1
     @pytest.mark.parametrize(
@@ -638,42 +638,21 @@ class TestDatasetCreate:
         payload = {"name": "parser_config_empty", "parser_config": {}}
         res = create_dataset(HttpApiAuth, payload)
         assert res["code"] == 0, res
-        assert res["data"]["parser_config"] == {
-            "chunk_token_num": 512,
-            "delimiter": r"\n",
-            "html4excel": False,
-            "layout_recognize": "DeepDOC",
-            "raptor": {"use_raptor": False},
-            "graphrag": {"use_graphrag": False},
-        }, res
+        assert res["data"]["parser_config"] == DEFAULT_PARSER_CONFIG, res
 
     @pytest.mark.p2
     def test_parser_config_unset(self, HttpApiAuth):
         payload = {"name": "parser_config_unset"}
         res = create_dataset(HttpApiAuth, payload)
         assert res["code"] == 0, res
-        assert res["data"]["parser_config"] == {
-            "chunk_token_num": 512,
-            "delimiter": r"\n",
-            "html4excel": False,
-            "layout_recognize": "DeepDOC",
-            "raptor": {"use_raptor": False},
-            "graphrag": {"use_graphrag": False},
-        }, res
+        assert res["data"]["parser_config"] == DEFAULT_PARSER_CONFIG, res
 
     @pytest.mark.p3
     def test_parser_config_none(self, HttpApiAuth):
         payload = {"name": "parser_config_none", "parser_config": None}
         res = create_dataset(HttpApiAuth, payload)
         assert res["code"] == 0, res
-        assert res["data"]["parser_config"] == {
-            "chunk_token_num": 512,
-            "delimiter": "\\n",
-            "html4excel": False,
-            "layout_recognize": "DeepDOC",
-            "raptor": {"use_raptor": False},
-            "graphrag": {"use_graphrag": False},
-        }, res
+        assert res["data"]["parser_config"] == DEFAULT_PARSER_CONFIG, res
 
     @pytest.mark.p2
     @pytest.mark.parametrize(

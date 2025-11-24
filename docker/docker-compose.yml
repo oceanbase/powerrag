@@ -20,10 +20,6 @@ services:
       - ./service_conf.yaml.template:/ragflow/conf/service_conf.yaml.template
       - ./entrypoint.sh:/ragflow/entrypoint.sh
     env_file: .env
-    environment:
-      - TZ=${TIMEZONE}
-      - HF_ENDPOINT=${HF_ENDPOINT-}
-      - MACOS=${MACOS-}
     networks:
       - powerrag
     restart: on-failure
