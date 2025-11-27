@@ -50,6 +50,8 @@ nltk_data/
 .lh/
 .venv
 docker/data
+docker/oceanbase/data
+docker/oceanbase/conf
 
 
 #--------------------------------------------------#
