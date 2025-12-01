@@ -12,30 +12,71 @@
 
 ## 🐳 Docker Compose
 
+本项目提供了以下 docker compose 配置：
+
 - **docker-compose.yml**  
-  设置 PowerRAG 及其依赖项的环境。
+  设置 PowerRAG 及其依赖项的环境，数据库使用 SeekDB。
+- **docker-compose-oceanbase.yml**  
+  设置 PowerRAG 及其依赖项的环境，数据库使用 OceanBase。
 - **docker-compose-self-hosted-ob.yml**  
-  设置使用自托管 OceanBase 的 PowerRAG 环境。
+  设置 PowerRAG 及其依赖项的环境，数据库使用自托管 OceanBase 或 SeekDB。
+
+程序默认使用 docker-compose.yml，您可以通过 `docker compose -f` 指定配置文件，例如使用自托管数据库启动服务时，可以使用如下命令：
+
+```shell
+docker compose -f docker-compose-self-hosted-ob.yml up -d
+```
 
 ## 🐬 Docker 环境变量
 
 [.env](./.env) 文件包含 Docker 的重要环境变量。
 
-### OceanBase
+### 数据库配置
 
-- `EXPOSE_OB_PORT`  
-  用于将 OceanBase 容器服务暴露到主机的端口，允许**外部**访问 Docker 容器内运行的服务。默认为 `2881`。
+当使用 **docker-compose.yml** 或 **docker-compose-oceanbase.yml** 时，可以设置 `EXPOSE_OB_PORT` 将数据库的 SQL 端口暴露到主机的端口，默认为 `2881`。
 
-- `OB_XXX`  
-  这些以 `OB_` 开头的环境变量用于设置 OceanBase Docker 容器的启动参数。更多详细信息，请参考 [DockerHub](https://hub.docker.com/r/oceanbase/oceanbase-ce)。
+#### 使用 SeekDB 容器（docker-compose.yml）
 
-请注意，如果您想使用自托管的 OceanBase，则无需关心上述变量，但应修改以下以 `OCEANBASE_` 开头的变量。
+SeekDB 容器支持以下环境变量配置，更多详细信息，请参考 [DockerHub](https://hub.docker.com/r/oceanbase/seekdb)。
 
 ```.dotenv
-OCEANBASE_HOST=oceanbase
-OCEANBASE_PORT=2881
+ROOT_PASSWORD=powerrag
+MEMORY_LIMIT=6G
+LOG_DISK_SIZE=20G
+DATAFILE_SIZE=20G
+```
+
+#### 使用 OceanBase 容器（docker-compose-oceanbase.yml）
+
+OceanBase 容器支持以下环境变量配置，更多详细信息，请参考 [DockerHub](https://hub.docker.com/r/oceanbase/oceanbase-ce)。
+
+```.dotenv
+OB_TENANT_NAME=powerrag
+OB_SYS_PASSWORD=powerrag
+OB_TENANT_PASSWORD=powerrag
+OB_MEMORY_LIMIT=10G
+OB_SYSTEM_MEMORY=2G
+OB_DATAFILE_SIZE=20G
+OB_LOG_DISK_SIZE=20G
+```
+
+除了上述容器配置外，您还需要修改如下配置，使得 PowerRAG 服务能够连接到 OceanBase：
+
+```.dotenv
 OCEANBASE_USER=root@${OB_TENANT_NAME}
 OCEANBASE_PASSWORD=${OB_TENANT_PASSWORD}
+```
+
+#### 使用自建数据库（docker-compose-self-hosted-ob.yml）
+
+使用自托管的 OceanBase 或 SeekDB 时，无需设置上述的数据库容器变量，但需要修改以下连接配置。
+
+```.dotenv
+OCEANBASE_USER=root
+OCEANBASE_PASSWORD=${ROOT_PASSWORD}
+
+OCEANBASE_HOST=oceanbase
+OCEANBASE_PORT=2881
 OCEANBASE_META_DBNAME=powerrag
 OCEANBASE_DOC_DBNAME=powerrag_doc
 ```
@@ -133,8 +174,8 @@ OCEANBASE_DOC_DBNAME=powerrag_doc
 
 5. **重启服务**
    ```bash
-   docker-compose down
-   docker-compose up -d
+   docker compose down
+   docker compose up -d
    ```
 
 

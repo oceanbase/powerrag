@@ -42,11 +42,9 @@ services:
       - ${EXPOSE_OB_PORT:-2881}:2881
     env_file: .env
     environment:
-      - ROOT_PASSWORD=${OCEANBASE_PASSWORD:-powerrag}
-      - OB_SERVER_IP=127.0.0.1
+      - INIT_SCRIPTS_PATH=/root/boot/init.d
     volumes:
-      - ./oceanbase/data:/var/lib/oceanbase/store
-      - ./oceanbase/conf:/var/lib/oceanbase/etc
+      - ./oceanbase/data:/var/lib/oceanbase
       - ./oceanbase/init.d:/root/boot/init.d
     networks:
       - powerrag

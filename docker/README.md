@@ -12,30 +12,71 @@
 
 ## 🐳 Docker Compose
 
+This project provides the following docker compose configurations:
+
 - **docker-compose.yml**  
-  Sets up environment for PowerRAG and its dependencies.
+  Sets up environment for PowerRAG and its dependencies, using SeekDB as the database.
+- **docker-compose-oceanbase.yml**  
+  Sets up environment for PowerRAG and its dependencies, using OceanBase as the database.
 - **docker-compose-self-hosted-ob.yml**  
-  Sets up environment for PowerRAG with self-hosted OceanBase.
+  Sets up environment for PowerRAG and its dependencies, using self-hosted OceanBase or SeekDB as the database.
+
+The program uses docker-compose.yml by default. You can specify a configuration file using `docker compose -f`. For example, when starting services with a self-hosted database, you can use the following command:
+
+```shell
+docker compose -f docker-compose-self-hosted-ob.yml up -d
+```
 
 ## 🐬 Docker environment variables
 
 The [.env](./.env) file contains important environment variables for Docker.
 
-### OceanBase
+### Database configuration
 
-- `EXPOSE_OB_PORT`  
-  The port used to expose OceanBase container service to the host machine, allowing **external** access to the service running inside the Docker container. Defaults to `2881`.
+When using **docker-compose.yml** or **docker-compose-oceanbase.yml**, you can set `EXPOSE_OB_PORT` to expose the database's SQL port to the host machine's port, defaulting to `2881`.
 
-- `OB_XXX`  
-  These environment variables, which begin with `OB_`, are used to set the startup parameters for the OceanBase Docker container. For more details, please refer to [DockerHub](https://hub.docker.com/r/oceanbase/oceanbase-ce).
+#### Using SeekDB container (docker-compose.yml)
 
-Note that if you want to use self-hosted OceanBase, you do not need to care about the variables above, but you should modify the following variables, which begin with `OCEANBASE_`.
+The SeekDB container supports the following environment variable configurations. For more details, please refer to [DockerHub](https://hub.docker.com/r/oceanbase/seekdb).
 
 ```.dotenv
-OCEANBASE_HOST=oceanbase
-OCEANBASE_PORT=2881
+ROOT_PASSWORD=powerrag
+MEMORY_LIMIT=6G
+LOG_DISK_SIZE=20G
+DATAFILE_SIZE=20G
+```
+
+#### Using OceanBase container (docker-compose-oceanbase.yml)
+
+The OceanBase container supports the following environment variable configurations. For more details, please refer to [DockerHub](https://hub.docker.com/r/oceanbase/oceanbase-ce).
+
+```.dotenv
+OB_TENANT_NAME=powerrag
+OB_SYS_PASSWORD=powerrag
+OB_TENANT_PASSWORD=powerrag
+OB_MEMORY_LIMIT=10G
+OB_SYSTEM_MEMORY=2G
+OB_DATAFILE_SIZE=20G
+OB_LOG_DISK_SIZE=20G
+```
+
+In addition to the container configurations above, you also need to modify the following configuration to allow PowerRAG services to connect to OceanBase:
+
+```.dotenv
 OCEANBASE_USER=root@${OB_TENANT_NAME}
 OCEANBASE_PASSWORD=${OB_TENANT_PASSWORD}
+```
+
+#### Using self-hosted database (docker-compose-self-hosted-ob.yml)
+
+When using self-hosted OceanBase or SeekDB, you do not need to set the database container variables above, but you need to modify the following connection configuration.
+
+```.dotenv
+OCEANBASE_USER=root
+OCEANBASE_PASSWORD=${ROOT_PASSWORD}
+
+OCEANBASE_HOST=oceanbase
+OCEANBASE_PORT=2881
 OCEANBASE_META_DBNAME=powerrag
 OCEANBASE_DOC_DBNAME=powerrag_doc
 ```
@@ -53,7 +94,7 @@ OCEANBASE_DOC_DBNAME=powerrag_doc
 
 ### Timezone
 
-- `TZ`  
+- `TIMEZONE`  
   The local time zone. Defaults to `'Asia/Shanghai'`.
 
 ### Hugging Face mirror site
@@ -133,8 +174,8 @@ If you want your instance to be available under `https`, follow these steps:
 
 5. **Restart the services**
    ```bash
-   docker-compose down
-   docker-compose up -d
+   docker compose down
+   docker compose up -d
    ```
 
 
