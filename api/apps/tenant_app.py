@@ -14,18 +14,18 @@
 #  limitations under the License.
 #
 
-from flask import request
-from flask_login import login_required, current_user
-
-from api import settings
-from api.apps import smtp_mail_server
-from api.db import UserTenantRole, StatusEnum
+from quart import request
+from api.db import UserTenantRole
 from api.db.db_models import UserTenant
 from api.db.services.user_service import UserTenantService, UserService
 
-from api.utils import get_uuid, delta_seconds
+from common.constants import RetCode, StatusEnum
+from common.misc_utils import get_uuid
+from common.time_utils import delta_seconds
 from api.utils.api_utils import get_json_result, validate_request, server_error_response, get_data_error_result
 from api.utils.web_utils import send_invite_email
+from common import settings
+from api.apps import smtp_mail_server, login_required, current_user
 
 
 @manager.route("/<tenant_id>/user/list", methods=["GET"])  # noqa: F821
@@ -35,7 +35,7 @@ def user_list(tenant_id):
         return get_json_result(
             data=False,
             message='No authorization.',
-            code=settings.RetCode.AUTHENTICATION_ERROR)
+            code=RetCode.AUTHENTICATION_ERROR)
 
     try:
         users = UserTenantService.get_by_tenant_id(tenant_id)
@@ -49,14 +49,14 @@ def user_list(tenant_id):
 @manager.route('/<tenant_id>/user', methods=['POST'])  # noqa: F821
 @login_required
 @validate_request("email")
-def create(tenant_id):
+async def create(tenant_id):
     if current_user.id != tenant_id:
         return get_json_result(
             data=False,
             message='No authorization.',
-            code=settings.RetCode.AUTHENTICATION_ERROR)
+            code=RetCode.AUTHENTICATION_ERROR)
 
-    req = request.json
+    req = await request.json
     invite_user_email = req["email"]
     invite_users = UserService.query(email=invite_user_email)
     if not invite_users:
@@ -108,7 +108,7 @@ def rm(tenant_id, user_id):
         return get_json_result(
             data=False,
             message='No authorization.',
-            code=settings.RetCode.AUTHENTICATION_ERROR)
+            code=RetCode.AUTHENTICATION_ERROR)
 
     try:
         UserTenantService.filter_delete([UserTenant.tenant_id == tenant_id, UserTenant.user_id == user_id])

@@ -22,7 +22,7 @@ PowerRAG Splitters
 """
 
 import logging
-from typing import List, Dict, Any
+from typing import Dict, Any
 from ..core.powerrag_base import PowerRAGComponentParam, PowerRAGComponent
 from powerrag.server.services.split_service import PowerRAGSplitService
 

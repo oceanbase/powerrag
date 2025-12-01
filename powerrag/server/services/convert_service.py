@@ -28,7 +28,7 @@ from typing import Dict, Any
 
 from api.db.services.document_service import DocumentService
 from api.db.services.file2document_service import File2DocumentService
-from rag.utils.storage_factory import STORAGE_IMPL
+from common.settings import STORAGE_IMPL
 from powerrag.parser import MinerUPdfParser, DotsOcrParser
 
 logger = logging.getLogger(__name__)

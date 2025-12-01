@@ -14,7 +14,6 @@
 #  limitations under the License.
 #
 
-import os
 import re
 import copy
 import logging
@@ -22,7 +21,6 @@ import logging
 from powerrag.app.pdf_parser_factory import create_pdf_parser
 from powerrag.app.gotenberg_converter import convert_office_to_pdf, convert_html_to_pdf
 from rag.nlp import rag_tokenizer
-import io
 from rag.nlp import find_codec
 
 # 引入 server/services/split_service.py 中的智能切片方法

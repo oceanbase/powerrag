@@ -7,7 +7,7 @@ import classNames from 'classnames';
 import { get } from 'lodash';
 import { memo } from 'react';
 import { NodeHandleId } from '../../constant';
-import { useGetVariableLabelByValue } from '../../hooks/use-get-begin-query';
+import { useGetVariableLabelOrTypeByValue } from '../../hooks/use-get-begin-query';
 import { CommonHandle, LeftEndHandle } from './handle';
 import styles from './index.less';
 import NodeHeader from './node-header';
@@ -23,7 +23,7 @@ function InnerRetrievalNode({
   const knowledgeBaseIds: string[] = get(data, 'form.kb_ids', []);
   const { list: knowledgeList } = useFetchKnowledgeList(true);
 
-  const getLabel = useGetVariableLabelByValue(id);
+  const { getLabel } = useGetVariableLabelOrTypeByValue(id);
 
   return (
     <ToolBar selected={selected} id={id} label={data.label}>
@@ -55,9 +55,8 @@ function InnerRetrievalNode({
                 <div className="flex items-center gap-1.5">
                   <RAGFlowAvatar
                     className="size-6 rounded-lg"
-                    avatar={id}
-                    name={item?.name || (label as string) || 'CN'}
-                    isPerson={true}
+                    avatar={item?.avatar}
+                    name={item ? item?.name : id}
                   />
 
                   <div className={'truncate flex-1'}>{label || item?.name}</div>

@@ -22,17 +22,13 @@ allowing PowerRAG parsing to be handled asynchronously by task_executor.
 """
 
 import logging
-from typing import Dict, Any, List
-from datetime import datetime
+from typing import Dict, Any
 
 from api.db.services.document_service import DocumentService
 from api.db.services.knowledgebase_service import KnowledgebaseService
 from api.db.services.task_service import TaskService, queue_tasks
 from api.db.services.file2document_service import File2DocumentService
-from api.db import ParserType
-from api.utils import get_uuid
-from rag.settings import get_svr_queue_name
-from rag.utils.redis_conn import REDIS_CONN
+from common.constants import ParserType
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +197,7 @@ class PowerRAGTaskQueueService:
                 }
             
             # Get chunks from document store
-            from rag import settings
+            from common import settings
             from rag.nlp import search
             
             kb_id = DocumentService.get_knowledgebase_id(doc_id)

@@ -22,7 +22,6 @@ PowerRAG Converters
 """
 
 import logging
-import os
 from typing import Dict, Any
 from ..core.powerrag_base import PowerRAGComponentParam, PowerRAGComponent
 from powerrag.server.services.convert_service import PowerRAGConvertService

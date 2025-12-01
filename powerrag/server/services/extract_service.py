@@ -18,12 +18,12 @@
 
 import re
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any
 from collections import Counter
 
 from api.db.services.document_service import DocumentService
 from api.db.services.file2document_service import File2DocumentService
-from rag.utils.storage_factory import STORAGE_IMPL
+from common.settings import STORAGE_IMPL
 
 # ⚠️ 延迟导入 PdfParser，避免启动时加载 OCR 模型
 # from deepdoc.parser import PdfParser as RAGFlowPdfParser

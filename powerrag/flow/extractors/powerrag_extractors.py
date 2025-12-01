@@ -22,7 +22,7 @@ PowerRAG Extractors
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any
 from ..core.powerrag_base import PowerRAGComponentParam, PowerRAGComponent
 from powerrag.server.services.extract_service import PowerRAGExtractService
 

@@ -20,14 +20,22 @@ import os
 import uuid
 
 import valkey as redis
-from rag import settings
-from rag.utils import singleton
+from common.decorator import singleton
+from common import settings
 from valkey.lock import Lock
 import trio
 
 from rag.utils.ob_redis_conn import MysqlDistributedLock, OceanBaseRedisDb
 from rag.utils.redis_able import RedisAble
 
+REDIS = {}
+try:
+    REDIS = settings.decrypt_database_config(name="redis")
+except Exception:
+    try:
+        REDIS = settings.get_base_config("redis", {})
+    except Exception:
+        REDIS = {}
 
 class RedisMsg:
     def __init__(self, consumer, queue_name, group_name, msg_id, message):
@@ -66,7 +74,7 @@ class RedisDB(RedisAble):
 
     def __init__(self):
         self.REDIS = None
-        self.config = settings.REDIS
+        self.config = REDIS
         self.__open__()
 
     def register_scripts(self) -> None:
@@ -76,16 +84,21 @@ class RedisDB(RedisAble):
 
     def __open__(self):
         try:
-            self.REDIS = redis.StrictRedis(
-                host=self.config["host"].split(":")[0],
-                port=int(self.config.get("host", ":6379").split(":")[1]),
-                db=int(self.config.get("db", 1)),
-                password=self.config.get("password"),
-                decode_responses=True,
-            )
+            conn_params = {
+                "host": self.config["host"].split(":")[0],
+                "port": int(self.config.get("host", ":6379").split(":")[1]),
+                "db": int(self.config.get("db", 1)),
+                "decode_responses": True,
+            }
+            password = self.config.get("password")
+            if password:
+                conn_params["password"] = password
+
+            self.REDIS = redis.StrictRedis(**conn_params)
+
             self.register_scripts()
-        except Exception:
-            logging.warning("Redis can't be connected.")
+        except Exception as e:
+            logging.warning(f"Redis can't be connected. Error: {str(e)}")
         return self.REDIS
 
     def health(self):
@@ -95,12 +108,13 @@ class RedisDB(RedisAble):
 
         if self.REDIS.get(a) == b:
             return True
+        return False
 
     def info(self):
         info = self.REDIS.info()
         return {
             'redis_version': info["redis_version"],
-            'server_mode': info["server_mode"],
+            'server_mode': info["server_mode"] if "server_mode" in info else info.get("redis_mode", ""),
             'used_memory': info["used_memory_human"],
             'total_system_memory': info["total_system_memory_human"],
             'mem_fragmentation_ratio': info["mem_fragmentation_ratio"],
@@ -115,7 +129,7 @@ class RedisDB(RedisAble):
 
     def exist(self, k):
         if not self.REDIS:
-            return
+            return None
         try:
             return self.REDIS.exists(k)
         except Exception as e:
@@ -124,7 +138,7 @@ class RedisDB(RedisAble):
 
     def get(self, k):
         if not self.REDIS:
-            return
+            return None
         try:
             return self.REDIS.get(k)
         except Exception as e:

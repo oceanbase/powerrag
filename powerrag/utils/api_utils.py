@@ -1,9 +1,9 @@
 import logging
 from flask import jsonify
 
-from api import settings
+from common.constants import RetCode
 
-def get_data_error_result(code=settings.RetCode.DATA_ERROR, message="Sorry! Data missing!"):
+def get_data_error_result(code=RetCode.DATA_ERROR, message="Sorry! Data missing!"):
     logging.exception(Exception(message))
     result_dict = {"code": code, "message": message}
     response = {}
@@ -14,7 +14,7 @@ def get_data_error_result(code=settings.RetCode.DATA_ERROR, message="Sorry! Data
             response[key] = value
     return jsonify(response)
 
-def get_json_result(code: settings.RetCode = settings.RetCode.SUCCESS, message="success", data=None):
+def get_json_result(code: RetCode = RetCode.SUCCESS, message="success", data=None):
     response = {"code": code, "message": message, "data": data}
     return jsonify(response)
 
@@ -23,21 +23,21 @@ def server_error_response(e):
     try:
         msg = repr(e).lower()
         if getattr(e, "code", None) == 401 or ("unauthorized" in msg) or ("401" in msg):
-            return get_json_result(code=settings.RetCode.UNAUTHORIZED, message=repr(e))
+            return get_json_result(code=RetCode.UNAUTHORIZED, message=repr(e))
     except Exception as ex:
         logging.warning(f"error checking authorization: {ex}")
 
     if len(e.args) > 1:
         try:
             serialized_data = serialize_for_json(e.args[1])
-            return get_json_result(code=settings.RetCode.EXCEPTION_ERROR, message=repr(e.args[0]), data=serialized_data)
+            return get_json_result(code=RetCode.EXCEPTION_ERROR, message=repr(e.args[0]), data=serialized_data)
         except Exception:
-            return get_json_result(code=settings.RetCode.EXCEPTION_ERROR, message=repr(e.args[0]), data=None)
+            return get_json_result(code=RetCode.EXCEPTION_ERROR, message=repr(e.args[0]), data=None)
     if repr(e).find("index_not_found_exception") >= 0:
-        return get_json_result(code=settings.RetCode.EXCEPTION_ERROR,
+        return get_json_result(code=RetCode.EXCEPTION_ERROR,
                                message="No chunk found, please upload file and parse it.")
 
-    return get_json_result(code=settings.RetCode.EXCEPTION_ERROR, message=repr(e))
+    return get_json_result(code=RetCode.EXCEPTION_ERROR, message=repr(e))
 
 def serialize_for_json(obj):
     """

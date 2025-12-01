@@ -18,7 +18,6 @@
 
 import os
 import logging
-import traceback
 import uuid
 import threading
 import requests
@@ -34,9 +33,9 @@ from langextract import data_lib
 from langextract import prompt_validation
 import dataclasses
 
-from api import settings
+from common import settings
 from api.db.services.tenant_llm_service import TenantLLMService
-from api.db import LLMType
+from common.constants import LLMType
 from rag.llm import SupportedLiteLLMProvider, FACTORY_DEFAULT_BASE_URL
 
 logger = logging.getLogger(__name__)

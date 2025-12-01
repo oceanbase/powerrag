@@ -22,7 +22,6 @@ It provides APIs for document parsing, conversion, splitting, and extraction.
 It reuses RAGFlow's data models and database tables.
 """
 
-import os
 import sys
 import logging
 import signal
@@ -36,13 +35,13 @@ sys.path.insert(0, str(project_root))
 from werkzeug.serving import run_simple
 
 # Initialize logging
-from api.utils.log_utils import init_root_logger
+from common.log_utils import init_root_logger
 init_root_logger("powerrag_server")
 
 logger = logging.getLogger(__name__)
 
 # Import after path is set
-from api import settings
+from common import settings
 from api.db.db_models import init_database_tables as init_web_db
 from api.db.runtime_config import RuntimeConfig
 from powerrag.server.app import create_app

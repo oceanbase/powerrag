@@ -18,19 +18,21 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from flask_login import current_user
 from peewee import fn
 
-from api.db import KNOWLEDGEBASE_FOLDER_NAME, FileSource, FileType, ParserType
-from api.db.db_models import DB, Document, File, File2Document, Knowledgebase
+from api.db import KNOWLEDGEBASE_FOLDER_NAME, FileType
+from api.db.db_models import DB, Document, File, File2Document, Knowledgebase, Task
 from api.db.services import duplicate_name
 from api.db.services.common_service import CommonService
 from api.db.services.document_service import DocumentService
 from api.db.services.file2document_service import File2DocumentService
-from api.utils import get_uuid
-from api.utils.file_utils import filename_type, read_potential_broken_pdf, thumbnail_img
+from common.misc_utils import get_uuid
+from common.constants import TaskStatus, FileSource, ParserType
+from api.db.services.knowledgebase_service import KnowledgebaseService
+from api.db.services.task_service import TaskService
+from api.utils.file_utils import filename_type, read_potential_broken_pdf, thumbnail_img, sanitize_path
 from rag.llm.cv_model import GptV4
-from rag.utils.storage_factory import STORAGE_IMPL
+from common import settings
 
 
 class FileService(CommonService):
@@ -181,6 +183,7 @@ class FileService(CommonService):
     @classmethod
     @DB.connection_context()
     def create_folder(cls, file, parent_id, name, count):
+        from api.apps import current_user
         # Recursively create folder structure
         # Args:
         #     file: Current file object
@@ -326,7 +329,7 @@ class FileService(CommonService):
         current_id = start_id
         while current_id:
             e, file = cls.get_by_id(current_id)
-            if file.parent_id != file.id and e:
+            if e and file.parent_id != file.id:
                 parent_folders.append(file)
                 current_id = file.parent_id
             else:
@@ -420,12 +423,14 @@ class FileService(CommonService):
 
     @classmethod
     @DB.connection_context()
-    def upload_document(self, kb, file_objs, user_id):
+    def upload_document(self, kb, file_objs, user_id, src="local", parent_path: str | None = None):
         root_folder = self.get_root_folder(user_id)
         pf_id = root_folder["id"]
         self.init_knowledgebase_docs(pf_id, user_id)
         kb_root_folder = self.get_kb_folder(user_id)
         kb_folder = self.new_a_file_from_kb(kb.tenant_id, kb.name, kb_root_folder["id"])
+
+        safe_parent_path = sanitize_path(parent_path)
 
         err, files = [], []
         for file in file_objs:
@@ -436,14 +441,14 @@ class FileService(CommonService):
                 if filetype == FileType.OTHER.value:
                     raise RuntimeError("This type of file has not been supported yet!")
 
-                location = filename
-                while STORAGE_IMPL.obj_exist(kb.id, location):
+                location = filename if not safe_parent_path else f"{safe_parent_path}/{filename}"
+                while settings.STORAGE_IMPL.obj_exist(kb.id, location):
                     location += "_"
 
                 blob = file.read()
                 if filetype == FileType.PDF.value:
                     blob = read_potential_broken_pdf(blob)
-                STORAGE_IMPL.put(kb.id, location, blob)
+                settings.STORAGE_IMPL.put(kb.id, location, blob)
 
                 doc_id = get_uuid()
 
@@ -451,7 +456,7 @@ class FileService(CommonService):
                 thumbnail_location = ""
                 if img is not None:
                     thumbnail_location = f"thumbnail_{doc_id}.png"
-                    STORAGE_IMPL.put(kb.id, thumbnail_location, img)
+                    settings.STORAGE_IMPL.put(kb.id, thumbnail_location, img)
 
                 doc = {
                     "id": doc_id,
@@ -462,6 +467,7 @@ class FileService(CommonService):
                     "created_by": user_id,
                     "type": filetype,
                     "name": filename,
+                    "source_type": src,
                     "suffix": Path(filename).suffix.lstrip("."),
                     "location": location,
                     "size": len(blob),
@@ -502,6 +508,7 @@ class FileService(CommonService):
     @staticmethod
     def parse(filename, blob, img_base64=True, tenant_id=None):
         from rag.app import audio, email, naive, picture, presentation
+        from api.apps import current_user
 
         def dummy(prog=None, msg=""):
             pass
@@ -530,9 +537,54 @@ class FileService(CommonService):
     @staticmethod
     def get_blob(user_id, location):
         bname = f"{user_id}-downloads"
-        return STORAGE_IMPL.get(bname, location)
+        return settings.STORAGE_IMPL.get(bname, location)
 
     @staticmethod
     def put_blob(user_id, location, blob):
         bname = f"{user_id}-downloads"
-        return STORAGE_IMPL.put(bname, location, blob)
+        return settings.STORAGE_IMPL.put(bname, location, blob)
+
+    @classmethod
+    @DB.connection_context()
+    def delete_docs(cls, doc_ids, tenant_id):
+        root_folder = FileService.get_root_folder(tenant_id)
+        pf_id = root_folder["id"]
+        FileService.init_knowledgebase_docs(pf_id, tenant_id)
+        errors = ""
+        kb_table_num_map = {}
+        for doc_id in doc_ids:
+            try:
+                e, doc = DocumentService.get_by_id(doc_id)
+                if not e:
+                    raise Exception("Document not found!")
+                tenant_id = DocumentService.get_tenant_id(doc_id)
+                if not tenant_id:
+                    raise Exception("Tenant not found!")
+
+                b, n = File2DocumentService.get_storage_address(doc_id=doc_id)
+
+                TaskService.filter_delete([Task.doc_id == doc_id])
+                if not DocumentService.remove_document(doc, tenant_id):
+                    raise Exception("Database error (Document removal)!")
+
+                f2d = File2DocumentService.get_by_document_id(doc_id)
+                deleted_file_count = 0
+                if f2d:
+                    deleted_file_count = FileService.filter_delete([File.source_type == FileSource.KNOWLEDGEBASE, File.id == f2d[0].file_id])
+                File2DocumentService.delete_by_document_id(doc_id)
+                if deleted_file_count > 0:
+                    settings.STORAGE_IMPL.rm(b, n)
+
+                doc_parser = doc.parser_id
+                if doc_parser == ParserType.TABLE:
+                    kb_id = doc.kb_id
+                    if kb_id not in kb_table_num_map:
+                        counts = DocumentService.count_by_kb_id(kb_id=kb_id, keywords="", run_status=[TaskStatus.DONE], types=[])
+                        kb_table_num_map[kb_id] = counts
+                    kb_table_num_map[kb_id] -= 1
+                    if kb_table_num_map[kb_id] <= 0:
+                        KnowledgebaseService.delete_field_map(kb_id)
+            except Exception as e:
+                errors += str(e)
+
+        return errors

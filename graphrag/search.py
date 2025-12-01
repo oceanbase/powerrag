@@ -21,13 +21,15 @@ import json_repair
 import pandas as pd
 import trio
 
-from api.utils import get_uuid
+from common.misc_utils import get_uuid
 from graphrag.query_analyze_prompt import PROMPTS
 from graphrag.utils import get_entity_type2samples, get_llm_cache, set_llm_cache, get_relation
-from rag.utils import num_tokens_from_string, get_float
+from common.token_utils import num_tokens_from_string
 from rag.utils.doc_store_conn import OrderByExpr
 
 from rag.nlp.search import Dealer, index_name
+from common.float_utils import get_float
+from common import settings
 
 
 class KGSearch(Dealer):
@@ -67,7 +69,7 @@ class KGSearch(Dealer):
     def _ent_info_from_(self, es_res, sim_thr=0.3):
         res = {}
         flds = ["content_with_weight", "_score", "entity_kwd", "rank_flt", "n_hop_with_weight"]
-        es_res = self.dataStore.getFields(es_res, flds)
+        es_res = self.dataStore.get_fields(es_res, flds)
         for _, ent in es_res.items():
             for f in flds:
                 if f in ent and ent[f] is None:
@@ -86,7 +88,7 @@ class KGSearch(Dealer):
 
     def _relation_info_from_(self, es_res, sim_thr=0.3):
         res = {}
-        es_res = self.dataStore.getFields(es_res, ["content_with_weight", "_score", "from_entity_kwd", "to_entity_kwd",
+        es_res = self.dataStore.get_fields(es_res, ["content_with_weight", "_score", "from_entity_kwd", "to_entity_kwd",
                                                    "weight_int"])
         for _, ent in es_res.items():
             if get_float(ent["_score"]) < sim_thr:
@@ -298,7 +300,7 @@ class KGSearch(Dealer):
         fltr["entities_kwd"] = entities
         comm_res = self.dataStore.search(fields, [], fltr, [],
                                          OrderByExpr(), 0, topn, idxnms, kb_ids)
-        comm_res_fields = self.dataStore.getFields(comm_res, fields)
+        comm_res_fields = self.dataStore.get_fields(comm_res, fields)
         txts = []
         for ii, (_, row) in enumerate(comm_res_fields.items()):
             obj = json.loads(row["content_with_weight"])
@@ -312,9 +314,8 @@ class KGSearch(Dealer):
 
 
 if __name__ == "__main__":
-    from api import settings
     import argparse
-    from api.db import LLMType
+    from common.constants import LLMType
     from api.db.services.knowledgebase_service import KnowledgebaseService
     from api.db.services.llm_service import LLMBundle
     from api.db.services.user_service import TenantService

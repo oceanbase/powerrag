@@ -21,10 +21,7 @@ PowerRAG only supports: PDF, Office (Word/Excel/PPT), HTML, Markdown
 - PDF and Markdown are parsed directly using MinerU parser
 """
 
-import io
-import re
 import logging
-import tempfile
 from typing import Dict, Any, List
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -32,9 +29,8 @@ from pathlib import Path
 # Import RAGFlow services and models
 from api.db.services.document_service import DocumentService
 from api.db.services.file2document_service import File2DocumentService
-from api.db import ParserType, FileType
-from api.utils.file_utils import filename_type
-from rag.utils.storage_factory import STORAGE_IMPL
+from common.constants import ParserType
+from common.settings import STORAGE_IMPL
 
 # Import split service for text chunking
 from powerrag.server.services.split_service import PowerRAGSplitService

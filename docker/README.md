@@ -53,7 +53,7 @@ OCEANBASE_DOC_DBNAME=powerrag_doc
 
 ### Timezone
 
-- `TIMEZONE`  
+- `TZ`  
   The local time zone. Defaults to `'Asia/Shanghai'`.
 
 ### Hugging Face mirror site
