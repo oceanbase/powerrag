@@ -17,13 +17,16 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from typing import Any, Optional
 
+import numpy as np
 from elasticsearch_dsl import Q, Search
 from pydantic import BaseModel
 from pymysql.converters import escape_string
 from pyobvector import ObVecClient, FtsIndexParam, FtsParser, ARRAY, VECTOR
+from pyobvector.client import ClusterVersionException
 from pyobvector.client.hybrid_search import HybridSearch
 from pyobvector.util import ObVersion
 from sqlalchemy import text, Column, String, Integer, JSON, Double, Row, Table
@@ -31,10 +34,10 @@ from sqlalchemy.dialects.mysql import LONGTEXT, TEXT
 from sqlalchemy.sql.type_api import TypeEngine
 
 from api.utils.configs import get_base_config
+from common import settings
 from common.constants import PAGERANK_FLD, TAG_FLD
 from common.decorator import singleton
 from common.float_utils import get_float
-from common import settings
 from rag.nlp import rag_tokenizer
 from rag.utils.doc_store_conn import DocStoreConnection, MatchExpr, OrderByExpr, FusionExpr, MatchTextExpr, \
     MatchDenseExpr
@@ -107,17 +110,6 @@ index_columns: list[str] = [
     "removed_kwd",
 ]
 
-fulltext_search_columns: list[str] = [
-    "docnm_kwd",
-    "content_with_weight",
-    "title_tks",
-    "title_sm_tks",
-    "important_tks",
-    "question_tks",
-    "content_ltks",
-    "content_sm_ltks"
-]
-
 fts_columns_origin: list[str] = [
     "docnm_kwd^10",
     "content_with_weight",
@@ -139,7 +131,7 @@ fulltext_index_name_template = "fts_idx_%s"
 # MATCH AGAINST: https://www.oceanbase.com/docs/common-oceanbase-database-cn-1000000002017607
 fulltext_search_template = "MATCH (%s) AGAINST ('%s' IN NATURAL LANGUAGE MODE)"
 # cosine_distance: https://www.oceanbase.com/docs/common-oceanbase-database-cn-1000000002012938
-vector_search_template = "cosine_distance(%s, %s)"
+vector_search_template = "cosine_distance(%s, '%s')"
 
 
 class SearchResult(BaseModel):
@@ -361,17 +353,27 @@ class OBConnection(DocStoreConnection):
             port = mysql_config.get("port", 2881)
             self.username = mysql_config.get("user", "root@test")
             self.password = mysql_config.get("password", "infini_rag_flow")
+            max_connections = mysql_config.get("max_connections", 300)
         else:
             logger.info("Use customized config to create OceanBase connection.")
             host = ob_config.get("host", "localhost")
             port = ob_config.get("port", 2881)
             self.username = ob_config.get("user", "root@test")
             self.password = ob_config.get("password", "infini_rag_flow")
+            max_connections = ob_config.get("max_connections", 300)
 
         self.db_name = ob_config.get("db_name", "test")
         self.uri = f"{host}:{port}"
 
         logger.info(f"Use OceanBase '{self.uri}' as the doc engine.")
+
+        # Set the maximum number of connections that can be created above the pool_size.
+        # By default, this is half of max_connections, but at least 10.
+        # This allows the pool to handle temporary spikes in demand without exhausting resources.
+        max_overflow = int(os.environ.get("OB_MAX_OVERFLOW", max(max_connections // 2, 10)))
+        # Set the number of seconds to wait before giving up when trying to get a connection from the pool.
+        # Default is 30 seconds, but can be overridden with the OB_POOL_TIMEOUT environment variable.
+        pool_timeout = int(os.environ.get("OB_POOL_TIMEOUT", "30"))
 
         for _ in range(ATTEMPT_TIME):
             try:
@@ -382,6 +384,9 @@ class OBConnection(DocStoreConnection):
                     db_name=self.db_name,
                     pool_pre_ping=True,
                     pool_recycle=3600,
+                    pool_size=max_connections,
+                    max_overflow=max_overflow,
+                    pool_timeout=pool_timeout,
                 )
                 break
             except Exception as e:
@@ -396,6 +401,37 @@ class OBConnection(DocStoreConnection):
         self._load_env_vars()
         self._check_ob_version()
         self._try_to_update_ob_query_timeout()
+
+        self.es = None
+        if self.enable_hybrid_search:
+            try:
+                self.es = HybridSearch(
+                    uri=self.uri,
+                    user=self.username,
+                    password=self.password,
+                    db_name=self.db_name,
+                    pool_pre_ping=True,
+                    pool_recycle=3600,
+                    pool_size=max_connections,
+                    max_overflow=max_overflow,
+                    pool_timeout=pool_timeout,
+                )
+                logger.info("OceanBase Hybrid Search feature is enabled")
+            except ClusterVersionException as e:
+                logger.info("Failed to initialize HybridSearch client, fallback to use SQL", exc_info=e)
+                self.es = None
+
+        if self.es is not None and self.search_original_content:
+            logger.info("HybridSearch is enabled, forcing search_original_content to False")
+            self.search_original_content = False
+        # Determine which columns to use for full-text search dynamically:
+        # If HybridSearch is enabled (self.es is not None), we must use tokenized columns (fts_columns_tks)
+        # for compatibility and performance with HybridSearch. Otherwise, we use the original content columns
+        # (fts_columns_origin), which may be controlled by an environment variable.
+        self.fulltext_search_columns = fts_columns_origin if self.search_original_content else fts_columns_tks
+
+        self._table_exists_cache: set[str] = set()
+        self._table_exists_cache_lock = threading.RLock()
 
         logger.info(f"OceanBase {self.uri} is healthy.")
 
@@ -415,18 +451,6 @@ class OBConnection(DocStoreConnection):
             raise Exception(
                 f"The version of OceanBase needs to be higher than or equal to 4.3.5.1, current version is {version_str}"
             )
-
-        self.es = None
-        if not ob_version < ObVersion.from_db_version_nums(4, 4, 1, 0) and self.enable_hybrid_search:
-            self.es = HybridSearch(
-                uri=self.uri,
-                user=self.username,
-                password=self.password,
-                db_name=self.db_name,
-                pool_pre_ping=True,
-                pool_recycle=3600,
-            )
-            logger.info("OceanBase Hybrid Search feature is enabled")
 
     def _try_to_update_ob_query_timeout(self):
         try:
@@ -477,6 +501,43 @@ class OBConnection(DocStoreConnection):
             return row[1]
         raise Exception(f"Variable '{var_name}' not found.")
 
+    def _check_table_exists_cached(self, table_name: str) -> bool:
+        """
+        Check table existence with cache to reduce INFORMATION_SCHEMA queries under high concurrency.
+        Only caches when table exists. Does not cache when table does not exist.
+        Thread-safe implementation: read operations are lock-free (GIL-protected),
+        write operations are protected by RLock to ensure cache consistency.
+
+        Args:
+            table_name: Table name
+
+        Returns:
+            Whether the table exists with all required indexes and columns
+        """
+        if table_name in self._table_exists_cache:
+            return True
+
+        try:
+            if not self.client.check_table_exists(table_name):
+                return False
+            for column_name in index_columns:
+                if not self._index_exists(table_name, index_name_template % (table_name, column_name)):
+                    return False
+            for fts_column in self.fulltext_search_columns:
+                column_name = fts_column.split("^")[0]
+                if not self._index_exists(table_name, fulltext_index_name_template % column_name):
+                    return False
+            for column in [column_order_id, column_group_id]:
+                if not self._column_exist(table_name, column.name):
+                    return False
+        except Exception as e:
+            raise Exception(f"OBConnection._check_table_exists_cached error: {str(e)}")
+
+        with self._table_exists_cache_lock:
+            if table_name not in self._table_exists_cache:
+                self._table_exists_cache.add(table_name)
+        return True
+
     """
     Table operations
     """
@@ -499,8 +560,7 @@ class OBConnection(DocStoreConnection):
                     process_func=lambda: self._add_index(indexName, column_name),
                 )
 
-            fts_columns = fts_columns_origin if self.search_original_content else fts_columns_tks
-            for fts_column in fts_columns:
+            for fts_column in self.fulltext_search_columns:
                 column_name = fts_column.split("^")[0]
                 _try_with_lock(
                     lock_name=f"ob_add_fulltext_idx_{indexName}_{column_name}",
@@ -545,24 +605,7 @@ class OBConnection(DocStoreConnection):
             raise Exception(f"OBConnection.deleteIndex error: {str(e)}")
 
     def indexExist(self, indexName: str, knowledgebaseId: str = None) -> bool:
-        try:
-            if not self.client.check_table_exists(indexName):
-                return False
-            for column_name in index_columns:
-                if not self._index_exists(indexName, index_name_template % (indexName, column_name)):
-                    return False
-            fts_columns = fts_columns_origin if self.search_original_content else fts_columns_tks
-            for fts_column in fts_columns:
-                column_name = fts_column.split("^")[0]
-                if not self._index_exists(indexName, fulltext_index_name_template % column_name):
-                    return False
-            for column in [column_order_id, column_group_id]:
-                if not self._column_exist(indexName, column.name):
-                    return False
-        except Exception as e:
-            raise Exception(f"OBConnection.indexExist error: {str(e)}")
-
-        return True
+        return self._check_table_exists_cached(indexName)
 
     def _get_count(self, table_name: str, filter_list: list[str] = None) -> int:
         where_clause = "WHERE " + " AND ".join(filter_list) if len(filter_list) > 0 else ""
@@ -852,10 +895,8 @@ class OBConnection(DocStoreConnection):
                 fulltext_query = escape_string(fulltext_query.strip())
                 fulltext_topn = m.topn
 
-                fts_columns = fts_columns_origin if self.search_original_content else fts_columns_tks
-
                 # get fulltext match expression and weight values
-                for field in fts_columns:
+                for field in self.fulltext_search_columns:
                     parts = field.split("^")
                     column_name: str = parts[0]
                     column_weight: float = float(parts[1]) if (len(parts) > 1 and parts[1]) else 1.0
@@ -884,7 +925,8 @@ class OBConnection(DocStoreConnection):
             fulltext_search_score_expr = f"({' + '.join(f'{expr} * {fulltext_search_weight.get(col, 0)}' for col, expr in fulltext_search_expr.items())})"
 
         if vector_data:
-            vector_search_expr = vector_search_template % (vector_column_name, vector_data)
+            vector_data_str = "[" + ",".join([str(np.float32(v)) for v in vector_data]) + "]"
+            vector_search_expr = vector_search_template % (vector_column_name, vector_data_str)
             # use (1 - cosine_distance) as score, which should be [-1, 1]
             # https://www.oceanbase.com/docs/common-oceanbase-database-standalone-1000000003577323
             vector_search_score_expr = f"(1 - {vector_search_expr})"
@@ -913,7 +955,7 @@ class OBConnection(DocStoreConnection):
 
         for index_name in indexNames:
 
-            if not self.client.check_table_exists(index_name):
+            if not self._check_table_exists_cached(index_name):
                 continue
 
             fulltext_search_hint = f"/*+ UNION_MERGE({index_name} {' '.join(fulltext_search_idx_list)}) */" if self.use_fulltext_hint else ""
@@ -1236,7 +1278,7 @@ class OBConnection(DocStoreConnection):
         return result
 
     def get(self, chunkId: str, indexName: str, knowledgebaseIds: list[str]) -> dict | None:
-        if not self.client.check_table_exists(indexName):
+        if not self._check_table_exists_cached(indexName):
             return None
 
         try:
@@ -1325,7 +1367,7 @@ class OBConnection(DocStoreConnection):
         return res
 
     def update(self, condition: dict, newValue: dict, indexName: str, knowledgebaseId: str) -> bool:
-        if not self.client.check_table_exists(indexName):
+        if not self._check_table_exists_cached(indexName):
             return True
 
         condition["kb_id"] = knowledgebaseId
@@ -1376,7 +1418,7 @@ class OBConnection(DocStoreConnection):
         return False
 
     def delete(self, condition: dict, indexName: str, knowledgebaseId: str) -> int:
-        if not self.client.check_table_exists(indexName):
+        if not self._check_table_exists_cached(indexName):
             return 0
 
         condition["kb_id"] = knowledgebaseId
