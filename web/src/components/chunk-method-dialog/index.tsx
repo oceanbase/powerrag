@@ -291,7 +291,8 @@ export function ChunkMethodDialog({
   useEffect(() => {
     if (selectedTag === DocumentParserType.Title) {
       const currentTitleLevel = form.getValues('parser_config.title_level');
-      if (!currentTitleLevel) {
+      // Only set default if title_level is truly missing (undefined or null), not if it's 0 or other falsy values
+      if (currentTitleLevel === undefined || currentTitleLevel === null) {
         form.setValue('parser_config.title_level', 3);
       }
     } else if (selectedTag === DocumentParserType.Regex) {

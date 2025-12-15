@@ -242,10 +242,9 @@ export default function DatasetSettings() {
         if (!currentDelimiter) {
           form.setValue('parser_config.delimiter', '\n');
         }
-        // IMPORTANT: Don't override title_level if it already has a value (from backend)
-        if (currentTitleLevel === undefined || currentTitleLevel === null) {
-          form.setValue('parser_config.title_level', 3);
-        } else {
+        // Note: title_level no longer has a frontend default value
+        // It will use the value from backend or remain undefined
+        if (currentTitleLevel !== undefined && currentTitleLevel !== null) {
           console.log('✅ Preserving existing title_level:', currentTitleLevel);
         }
       } else {

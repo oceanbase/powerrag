@@ -145,7 +145,6 @@ class PowerRAGSplitService:
                 parser_config = {
                     "regex_pattern": config.get("regex_pattern", config.get("pattern", r'[.!?]+\s*')),
                     "chunk_token_num": config.get("chunk_token_num", 512),
-                    "min_chunk_tokens": config.get("min_chunk_tokens", 128),
                     "delimiter": config.get("delimiter", "\n。.；;！!？?"),
                 }
                 chunks = chunker(text, parser_config=parser_config)
@@ -199,6 +198,93 @@ class PowerRAGSplitService:
 
 
 # ==============================================
+# Shared utility functions for chunking
+# ==============================================
+def split_text_by_delimiter(text: str, target_size: int, delimiter: str) -> List[str]:
+    """
+    Split text by delimiters while respecting protected regions.
+    This is a shared utility function used by both regex and title chunking.
+    
+    Args:
+        text: Text to split
+        target_size: Target chunk size in tokens
+        delimiter: Delimiter string containing characters to split on
+        
+    Returns:
+        List of text chunks
+    """
+    if num_tokens_from_string(text) <= target_size:
+        return [text]
+    
+    # Try to split by each delimiter
+    for delim in delimiter:
+        if delim in text:
+            # Find all delimiter positions that are not in protected regions
+            delimiter_positions = []
+            start = 0
+            while True:
+                pos = text.find(delim, start)
+                if pos == -1:
+                    break
+                if not is_in_protected_region(text, pos):
+                    delimiter_positions.append(pos)
+                start = pos + 1
+            
+            if not delimiter_positions:
+                continue
+            
+            # Split text at safe delimiter positions
+            result = []
+            current_chunk = ""
+            last_pos = 0
+            
+            for pos in delimiter_positions:
+                # Get the text segment including the delimiter
+                segment = text[last_pos:pos + len(delim)]
+                
+                # When merging chunks, ensure we preserve delimiters between segments
+                if current_chunk:
+                    test_chunk = current_chunk + segment
+                else:
+                    test_chunk = segment
+                
+                if num_tokens_from_string(test_chunk) <= target_size:
+                    current_chunk = test_chunk
+                else:
+                    if current_chunk:
+                        result.append(current_chunk)
+                    current_chunk = segment
+                last_pos = pos + len(delim)
+            
+            # Handle the remaining text
+            if last_pos < len(text):
+                remaining = text[last_pos:]
+                if current_chunk:
+                    test_chunk = current_chunk + remaining
+                else:
+                    test_chunk = remaining
+                
+                if num_tokens_from_string(test_chunk) <= target_size:
+                    current_chunk = test_chunk
+                else:
+                    if current_chunk:
+                        result.append(current_chunk)
+                    current_chunk = remaining
+            
+            if current_chunk:
+                result.append(current_chunk)
+            
+            # If splitting helped, return the result
+            if len(result) > 1:
+                filtered_result = [chunk for chunk in result if chunk.strip()]
+                if filtered_result:  # Ensure we don't return empty list
+                    return filtered_result
+    
+    # If no delimiter splitting worked, return the original text
+    return [text]
+
+
+# ==============================================
 # Regex-based chunking
 # ==============================================
 def regex_based_chunking(
@@ -212,29 +298,34 @@ def regex_based_chunking(
         txt: 要分块的文本
         parser_config: 分块配置参数
             - chunk_token_num: 目标分块大小（tokens）
-            - min_chunk_tokens: 最小分块大小（tokens）
             - regex_pattern: 自定义正则表达式，用于初步分割文本单元
             - delimiter: 用于拆分过大切片的分隔符字符串
+        注意: min_chunk_tokens 不再作为可配置参数，而是自动计算为 chunk_token_num 的三分之一。
 
     Returns:
         分块列表
     """
     if not txt.strip():
-        return []
+        return []  # 即使为空，也返回包含原始内容的列表
 
     if parser_config is None:
         parser_config = {}
 
     chunk_token_num = parser_config.get("chunk_token_num", 256)
-    min_chunk_tokens = parser_config.get("min_chunk_tokens", 128)
     regex_pattern = parser_config.get("regex_pattern", r'[.!?]+\s*')
     delimiter = parser_config.get("delimiter", "\n。.；;！!？？")
     
+    # 如果chunk_token_num=0，直接返回按regex分割的原始parts，不进行合并或切片
+    if chunk_token_num == 0:
+        parts = re.split(f'({regex_pattern})', txt)
+        parts = [part for part in parts if part.strip()]
+        return parts if parts else [txt]
+    
     # 验证参数合理性
-    if chunk_token_num <= 0:
-        raise ValueError("chunk_token_num 必须为正数")
-    if min_chunk_tokens <= 0 or min_chunk_tokens > chunk_token_num:
-        raise ValueError("min_chunk_tokens 必须为正数且不大于 chunk_token_num")
+    if chunk_token_num < 0:
+        raise ValueError("chunk_token_num 必须为非负数")
+    
+    min_chunk_tokens = chunk_token_num // 3  # 统一使用 chunk_token_num / 3 作为最小切片大小
 
     # 使用正则表达式进行初步分割，保留分隔符
     # 注意：正则表达式应设计为捕获有意义的文本单元（如段落、句子等）
@@ -247,138 +338,69 @@ def regex_based_chunking(
 
     chunks = []
     current_chunk = []
-    current_token_count = 0
-
-    def split_large_chunk_by_delimiter(chunk_text: str) -> List[str]:
-        """使用delimiter拆分过大的切片"""
+    
+    def process_chunk(chunk_text: str):
+        """
+        处理一个完整的chunk：
+        1. 如果块太小，合并到前一个块
+        2. 如果块大小<=chunk_token_num * 1.5，直接添加
+        3. 块大小>chunk_token_num * 1.5，进一步切分
+        """
+        if not chunk_text.strip():
+            return
+        
         chunk_tokens = num_tokens_from_string(chunk_text)
-        if chunk_tokens <= chunk_token_num:
-            return [chunk_text]
         
-        # 尝试使用每个delimiter进行拆分
-        for delim in delimiter:
-            if delim in chunk_text:
-                # 找到所有不在保护区域内的分隔符位置
-                delimiter_positions = []
-                start = 0
-                while True:
-                    pos = chunk_text.find(delim, start)
-                    if pos == -1:
-                        break
-                    if not is_in_protected_region(chunk_text, pos):
-                        delimiter_positions.append(pos)
-                    start = pos + 1
-                
-                if not delimiter_positions:
-                    continue
-                
-                # 按分隔符位置拆分
-                result = []
-                current_sub_chunk = ""
-                last_pos = 0
-                
-                for pos in delimiter_positions:
-                    segment = chunk_text[last_pos:pos + len(delim)]
-                    test_chunk = current_sub_chunk + segment if current_sub_chunk else segment
-                    
-                    if num_tokens_from_string(test_chunk) <= chunk_token_num:
-                        current_sub_chunk = test_chunk
-                    else:
-                        if current_sub_chunk:
-                            result.append(current_sub_chunk)
-                        current_sub_chunk = segment
-                    last_pos = pos + len(delim)
-                
-                # 处理剩余文本
-                if last_pos < len(chunk_text):
-                    remaining = chunk_text[last_pos:]
-                    test_chunk = current_sub_chunk + remaining if current_sub_chunk else remaining
-                    if num_tokens_from_string(test_chunk) <= chunk_token_num:
-                        current_sub_chunk = test_chunk
-                    else:
-                        if current_sub_chunk:
-                            result.append(current_sub_chunk)
-                        current_sub_chunk = remaining
-                
-                if current_sub_chunk:
-                    result.append(current_sub_chunk)
-                
-                # 如果拆分成功，返回结果
-                if len(result) > 1:
-                    return result
+        # 1. 如果块太小，合并到前一个块
+        if chunk_tokens < min_chunk_tokens and chunks:
+            chunks[-1] += chunk_text
+            return
         
-        # 如果所有delimiter都无法拆分，返回原文本
-        return [chunk_text]
+        # 2. 如果块大小<=chunk_token_num * 1.5，直接添加
+        if chunk_tokens <= chunk_token_num * 1.5:
+            chunks.append(chunk_text)
+            return
+        
+        # 3. 块大小>chunk_token_num * 1.5，进一步切分
+        split_chunks = split_text_by_delimiter(chunk_text, chunk_token_num, delimiter)
+        if len(split_chunks) > 1:
+            # 拆分成功，递归处理每个子块
+            for sub_chunk in split_chunks:
+                process_chunk(sub_chunk)
+        else:
+            # 拆分失败，直接添加（即使超过1.5倍，也比丢失内容好）
+            chunks.append(chunk_text)
 
+    # 主循环：按顺序处理每个part
     for part in parts:
-        # 计算当前部分的token数量
-        part_tokens = num_tokens_from_string(part)
-
-        # 如果当前部分本身超过目标大小，使用delimiter进行拆分
-        if part_tokens > chunk_token_num:
-            # 先处理当前已累积的内容
-            if current_token_count >= min_chunk_tokens:
-                chunks.append(''.join(current_chunk))
-                current_chunk = []
-                current_token_count = 0
-            
-            # 使用delimiter拆分过大的部分
-            split_parts = split_large_chunk_by_delimiter(part)
-            chunks.extend(split_parts)
-            continue
-
-        # 尝试添加到当前块
-        new_token_count = current_token_count + part_tokens
-
-        if new_token_count <= chunk_token_num:
-            # 未超过目标大小，直接添加
-            current_chunk.append(part)
-            current_token_count = new_token_count
+        # 计算添加part后的chunk大小
+        current_chunk_text = ''.join(current_chunk) if current_chunk else ''
+        if current_chunk_text:
+            new_tokens = num_tokens_from_string(current_chunk_text + part)
         else:
-            # 超过目标大小，检查当前块是否满足最小要求
-            if current_token_count >= min_chunk_tokens:
-                # 满足最小要求，结束当前块
-                chunks.append(''.join(current_chunk))
-                current_chunk = [part]
-                current_token_count = part_tokens
-            else:
-                # 不满足最小要求，强制合并当前部分
-                current_chunk.append(part)
-                current_token_count = new_token_count
-                
-                # 如果合并后仍然过大，尝试使用delimiter拆分
-                if current_token_count > chunk_token_num * 1.5:
-                    combined_text = ''.join(current_chunk)
-                    split_chunks = split_large_chunk_by_delimiter(combined_text)
-                    if len(split_chunks) > 1:
-                        # 拆分成功，保留第一个作为当前块，其余添加到chunks
-                        current_chunk = [split_chunks[0]]
-                        current_token_count = num_tokens_from_string(split_chunks[0])
-                        chunks.extend(split_chunks[1:])
-
-    # 处理剩余内容
-    if current_chunk:
-        combined_text = ''.join(current_chunk)
-        combined_tokens = num_tokens_from_string(combined_text)
+            new_tokens = num_tokens_from_string(part)
         
-        # 如果剩余内容过大，尝试拆分
-        if combined_tokens > chunk_token_num * 1.5:
-            split_chunks = split_large_chunk_by_delimiter(combined_text)
-            if len(split_chunks) > 1:
-                chunks.extend(split_chunks)
-            else:
-                # 拆分失败，确保最后一块满足最小要求
-                if combined_tokens < min_chunk_tokens and chunks:
-                    chunks[-1] += combined_text
-                else:
-                    chunks.append(combined_text)
+        # 如果添加part后不超过目标大小，继续累积
+        if new_tokens <= chunk_token_num:
+            current_chunk.append(part)
         else:
-            # 确保最后一块满足最小要求
-            if combined_tokens < min_chunk_tokens and chunks:
-                chunks[-1] += combined_text
-            else:
-                chunks.append(combined_text)
+            # 先处理已累积的current_chunk（如果有）
+            if current_chunk:
+                current_chunk_text = ''.join(current_chunk)
+                process_chunk(current_chunk_text)
+            # 再处理当前part
+            process_chunk(part)
+            current_chunk = []
+    
+    # 处理剩余的chunk
+    if current_chunk:
+        remaining_text = ''.join(current_chunk) if current_chunk else ''
+        process_chunk(remaining_text)
 
+    # 如果没有生成任何chunks（可能因为所有parts都被过滤或处理失败），返回整个文档
+    if not chunks:
+        return [txt]
+    
     return chunks
 
 
@@ -406,16 +428,20 @@ def title_based_chunking(md_content: str, parser_config: Dict[str, Any] = None) 
     chunk_token_num = parser_config.get("chunk_token_num", 256)
     delimiter = parser_config.get("delimiter", "\n。；！？")
 
-    if not md_content or not isinstance(title_level, int) or title_level < 1 or title_level > 4:
-        return ([md_content] if md_content else [], [""] if md_content else [])
-
+    # 如果title_level无效，返回整个文档内容
+    if not isinstance(title_level, int) or title_level < 1 or title_level > 6:
+        return ([], [])
+    
+    # 如果内容为空，返回空列表
+    if not md_content:
+        return ([], [])
+    
     # Split content into lines while preserving original structure
     lines = md_content.split("\n")
     chunks = []
     titles = []
     current_chunk_lines = []
     current_title = ""
-    chunk_positions = []  # Track position information for debugging
 
     # Helper function to check if a line is a valid header of specific level
     def is_header_of_level(line: str, level: int) -> tuple[bool, str]:
@@ -423,11 +449,9 @@ def title_based_chunking(md_content: str, parser_config: Dict[str, Any] = None) 
         # Must start at beginning of line (no whitespace)
         if stripped_line != stripped_line.lstrip():
             return False, ""
-
         # Must start with exact number of #s followed by space
         if not stripped_line.startswith("#" * level + " "):
             return False, ""
-
         # Extract title content (remove the # symbols and space)
         title_content = stripped_line[level + 1:].strip()
         return True, title_content
@@ -443,9 +467,7 @@ def title_based_chunking(md_content: str, parser_config: Dict[str, Any] = None) 
                 if chunk_content:  # Only add non-empty chunks
                     chunks.append(chunk_content)
                     titles.append(current_title)
-                    chunk_positions.append(f"Lines {i - len(current_chunk_lines) + 1}-{i}")
                 current_chunk_lines = []
-
             # Start new chunk with the header and update current title
             current_chunk_lines = [line]
             current_title = title_content
@@ -459,127 +481,71 @@ def title_based_chunking(md_content: str, parser_config: Dict[str, Any] = None) 
         if chunk_content:  # Only add non-empty chunks
             chunks.append(chunk_content)
             titles.append(current_title)
-            chunk_positions.append(f"Lines {len(lines) - len(current_chunk_lines) + 1}-{len(lines)}")
 
     # If no chunks were created (no headers found), return entire content as one chunk
     if not chunks:
-        content = md_content.strip()
-        return ([content] if content else [], [""] if content else [])
+        # 即使没有找到标题，也返回整个文档内容
+        return ([md_content], [""])
 
     logging.info(f"Created {len(chunks)} chunks from document with {len(lines)} lines")
 
-    return split_with_title_chunks(chunks, chunk_token_num, delimiter, title_level), titles
+    # 如果chunk_token_num=0，直接返回按title分割的原始chunks，不进行合并或切片
+    if chunk_token_num == 0:
+        return chunks, titles
+
+    return [content for content, _ in split_with_title_chunks(chunks, chunk_token_num, delimiter, title_level)], titles
 
 
 def split_with_title_chunks(sections, chunk_token_num=512, delimiter="\n。；！？", title_level=3):
     """
     Split large chunks while preserving original titles for sub-chunks.
-    Small chunk merging is not implemented yet (todo for future).
+    
+    Args:
+        sections: List of (section_content, title) tuples
+        chunk_token_num: Target chunk size in tokens
+        delimiter: Delimiters used for splitting large chunks
+        title_level: Title level for extraction
     """
     if not sections:
         return []
     if isinstance(sections[0], type("")):
         sections = [(s, "") for s in sections]
+    
+    # 如果chunk_token_num=0，直接返回原始sections，不进行合并或切片
+    if chunk_token_num == 0:
+        return sections
 
-    def split_chunk_by_delimiter(text, target_size, original_title):
-        """Split a large chunk by delimiters to get chunks close to target_size"""
-        if num_tokens_from_string(text) <= target_size:
+    def split_chunk_by_delimiter_with_title(text, target_size, original_title):
+        """
+        Split a large chunk by delimiters while preserving title.
+        Uses the shared split_text_by_delimiter function and adds title-specific logic.
+        """
+        # Use shared delimiter splitting function
+        split_chunks = split_text_by_delimiter(text, target_size, delimiter)
+        
+        # If no splitting occurred, return original text with title
+        if len(split_chunks) == 1:
+            chunk_content = split_chunks[0]
+            if original_title and not chunk_content.startswith(original_title):
+                chunk_with_title = f"{original_title}\n{chunk_content}"
+            else:
+                chunk_with_title = chunk_content
+            if not _is_title_only_chunk(chunk_with_title, original_title):
+                return [(chunk_with_title, original_title)]
             return [(text, original_title)]
-
-        # Try to split by each delimiter
-        for delim in delimiter:
-            if delim in text:
-                # Find all delimiter positions that are not in protected regions
-                delimiter_positions = []
-                start = 0
-                while True:
-                    pos = text.find(delim, start)
-                    if pos == -1:
-                        break
-                    if not is_in_protected_region(text, pos):
-                        delimiter_positions.append(pos)
-                    start = pos + 1
-
-                if not delimiter_positions:
-                    continue
-
-                # Split text at safe delimiter positions
-                result = []
-                current_chunk = ""
-                last_pos = 0
-
-                for pos in delimiter_positions:
-                    # Get the text segment including the delimiter
-                    segment = text[last_pos:pos + len(delim)]
-
-                    # When merging chunks, ensure we preserve delimiters between segments
-                    if current_chunk:
-                        test_chunk = current_chunk + segment
-                    else:
-                        test_chunk = segment
-
-                    if num_tokens_from_string(test_chunk) <= target_size:
-                        current_chunk = test_chunk
-                    else:
-                        if current_chunk:
-                            # 检查分块是否已经包含该标题，如果包含则不重复插入
-                            # 保留分隔符，不使用rstrip()
-                            chunk_content = current_chunk
-                            if original_title and not chunk_content.startswith(original_title):
-                                chunk_with_title = f"{original_title}\n{chunk_content}"
-                            else:
-                                chunk_with_title = chunk_content
-                            # Skip standalone title-only chunks
-                            if not _is_title_only_chunk(chunk_with_title, original_title):
-                                result.append((chunk_with_title, original_title))
-                        current_chunk = segment
-                    last_pos = pos + len(delim)
-
-                # Handle the remaining text
-                if last_pos < len(text):
-                    remaining = text[last_pos:]
-
-                    # When merging with remaining text, preserve delimiters
-                    if current_chunk:
-                        test_chunk = current_chunk + remaining
-                    else:
-                        test_chunk = remaining
-
-                    if num_tokens_from_string(test_chunk) <= target_size:
-                        current_chunk = test_chunk
-                    else:
-                        if current_chunk:
-                            # 保留分隔符，不使用rstrip()
-                            chunk_content = current_chunk
-                            if original_title and not chunk_content.startswith(original_title):
-                                chunk_with_title = f"{original_title}\n{chunk_content}"
-                            else:
-                                chunk_with_title = chunk_content
-                            # Skip standalone title-only chunks
-                            if not _is_title_only_chunk(chunk_with_title, original_title):
-                                result.append((chunk_with_title, original_title))
-                        current_chunk = remaining
-
-                if current_chunk:
-                    # 检查最后一个分块是否已经包含该标题，如果包含则不重复插入
-                    # 保留分隔符，不使用rstrip()
-                    chunk_content = current_chunk
-                    if original_title and not chunk_content.startswith(original_title):
-                        chunk_with_title = f"{original_title}\n{chunk_content}"
-                    else:
-                        chunk_with_title = chunk_content
-                    # Skip standalone title-only chunks
-                    if not _is_title_only_chunk(chunk_with_title, original_title):
-                        result.append((chunk_with_title, original_title))
-
-                # If splitting helped, return the result
-                if len(result) > 1:
-                    filtered_result = [(chunk, title) for chunk, title in result if chunk.strip()]
-                    if filtered_result:  # Ensure we don't return empty list
-                        return filtered_result
-
-        # If no delimiter splitting worked, return the original text with its title inserted
-        return [(text, original_title)]
+        
+        # Process each split chunk and add title if needed
+        result = []
+        for chunk_content in split_chunks:
+            if original_title and not chunk_content.startswith(original_title):
+                chunk_with_title = f"{original_title}\n{chunk_content}"
+            else:
+                chunk_with_title = chunk_content
+            # Skip standalone title-only chunks
+            if not _is_title_only_chunk(chunk_with_title, original_title):
+                result.append((chunk_with_title, original_title))
+        
+        return result if result else [(text, original_title)]
 
     # 检查切片是否只有标题
     def _is_title_only_chunk(chunk_text: str, title: str) -> bool:
@@ -623,8 +589,9 @@ def split_with_title_chunks(sections, chunk_token_num=512, delimiter="\n。；�
     # Step 1: Merge small chunks before splitting
     # Merge chunks that are smaller than chunk_token_num / 3
     # Merge condition: current chunk's title level <= previous chunk's title level, or current chunk has no title
-    merged_sections = []
-    min_chunk_size = chunk_token_num / 3
+    # merged_sections = []
+    min_chunk_size = chunk_token_num // 3  # 统一使用 chunk_token_num / 3 作为最小切片大小
+    result_chunks = []  # Initialize result_chunks list
     
     for section, title in sections:
         section_tokens = num_tokens_from_string(section)
@@ -632,43 +599,33 @@ def split_with_title_chunks(sections, chunk_token_num=512, delimiter="\n。；�
         current_title_level = _get_title_level(extracted_title)
         
         # Check if current section is too small and should be merged
-        if section_tokens < min_chunk_size and merged_sections:
+        if section_tokens < min_chunk_size and result_chunks:
             # Get previous section info
-            prev_section, prev_title = merged_sections[-1]
+            prev_section, prev_title = result_chunks[-1]
             prev_extracted_title = prev_title if prev_title else extract_title_from_markdown(prev_section, title_level)
             prev_title_level = _get_title_level(prev_extracted_title)
             
-            # Merge condition: current title level <= previous title level, or current has no title (level 999)
+            # 当前标题级别更低（数字更大）或相等，或者是正文（999）可能会被合并
             if current_title_level >= prev_title_level or current_title_level == 999:
                 # Calculate merged content and tokens before merging
                 merged_content = prev_section + "\n\n" + section
                 merged_tokens = num_tokens_from_string(merged_content)
                 
-                # Only merge if merged tokens are less than chunk_token_num * 1.2
-                if merged_tokens < chunk_token_num * 1.2:
+                # 合并后大小小于 chunk_token_num * 1.5，太大了也不会合并
+                if merged_tokens < chunk_token_num * 1.5:
                     # Use the previous title (higher level or existing title)
                     merged_title = prev_extracted_title if prev_title_level <= current_title_level else extracted_title
-                    merged_sections[-1] = (merged_content, merged_title)
+                    result_chunks[-1] = (merged_content, merged_title)
+                else:
+                    result_chunks.append((section, extracted_title))
                     continue
-        
-        # Don't merge, add as new section
-        merged_sections.append((section, extracted_title))
-
-    # Step 2: Split large chunks after merging
-    result_chunks = []
-    
-    for section, title in merged_sections:
-        section_tokens = num_tokens_from_string(section)
-        
-        # Extract title from markdown section if no title provided
-        extracted_title = title if title else extract_title_from_markdown(section, title_level)
-
-        # If section is too large, split it and preserve the original title
-        if section_tokens > chunk_token_num * 2:
-            split_chunks = split_chunk_by_delimiter(section, chunk_token_num, extracted_title)
+            else:
+                # Cannot merge due to title level, add as new chunk
+                result_chunks.append((section, extracted_title))
+        elif section_tokens > chunk_token_num * 2:
+            split_chunks = split_chunk_by_delimiter_with_title(section, chunk_token_num, extracted_title)
             result_chunks.extend(split_chunks)
         else:
-            # For small chunks, keep them as-is
             result_chunks.append((section, extracted_title))
 
     return result_chunks

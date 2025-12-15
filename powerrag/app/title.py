@@ -114,19 +114,12 @@ def chunk(filename=None, binary=None, from_page=0, to_page=100000, lang="Chinese
         # Use the order-guaranteed chunking method to ensure consistency with original document
         chunks, _ = title_based_chunking(md_content=md_content, parser_config=parser_config)
 
-    # Ensure all chunks are strings (handle case where chunks might be tuples)
-    processed_chunks = []
-    for chunk in chunks:
-        if isinstance(chunk, tuple):
-            # chunk is (content, title) tuple
-            processed_chunks.append(chunk[0])  # Extract content string
-
     if callback:
-        callback(msg=f"Created {len(processed_chunks)} chunks with order guarantee")
+        callback(msg=f"Created {len(chunks)} chunks with order guarantee")
 
     # Import here to avoid circular import
     from powerrag.app import tokenize_chunks
-    res = tokenize_chunks(processed_chunks, doc, is_english, pdf_parser)
+    res = tokenize_chunks(chunks, doc, is_english, pdf_parser)
     return res
 
 

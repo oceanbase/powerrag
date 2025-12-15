@@ -75,17 +75,26 @@ export function useFillDefaultValueOnMount() {
         pages: [],
       };
 
-      return Object.entries(defaultParserValues).reduce<Record<string, any>>(
-        (pre, [key, value]) => {
-          if (key in parserConfig) {
-            pre[key] = parserConfig[key as keyof IParserConfig];
-          } else {
-            pre[key] = value;
-          }
-          return pre;
-        },
-        {},
-      );
+      const merged = Object.entries(defaultParserValues).reduce<
+        Record<string, any>
+      >((pre, [key, value]) => {
+        if (key in parserConfig) {
+          pre[key] = parserConfig[key as keyof IParserConfig];
+        } else {
+          pre[key] = value;
+        }
+        return pre;
+      }, {});
+
+      // Preserve title_level from parserConfig if it exists
+      if (
+        'title_level' in parserConfig &&
+        parserConfig.title_level !== undefined
+      ) {
+        merged.title_level = parserConfig.title_level;
+      }
+
+      return merged;
     },
     [],
   );
