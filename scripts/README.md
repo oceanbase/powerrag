@@ -96,14 +96,14 @@ API_KEY=xxx HOST=xxx DATASET_ID=xxx BATCH_SIZE=1000 ./scripts/tools.sh reparse-f
 ### 运维部署相关
 
 - `WORKER_COUNT` - Worker 数量（默认: 2）
-- `SERVER_PORT_FOR_WEB` - Ragflow Server 端口（默认: 9385）
+- `SERVER_PORT_FOR_WEB` - Ragflow Server 端口（默认: 9380）
 - `WEB_PORT` - Web 前端端口（默认: 9222）
 
 ### Wiki 上传相关
 
-- `API_KEY` - API Key（默认: ragflow-HeewVgbFXZ1xiebiiHEzhxmZAQb-kOLXBa5WxEVe0JU）
-- `HOST` - 服务器地址（默认: http://6.13.51.232:9385）
-- `WIKI_DATA_DIR` - 数据目录（默认: /data/keyang.lk/data/bailing/wiki_zh_20250901_json）
+- `API_KEY` - API Key
+- `HOST` - 服务器地址（默认: http://127.0.0.1:9380）
+- `WIKI_DATA_DIR` - 数据目录
 - `DATASET_ID` - 数据集 ID（可选）
 - `BATCH_SIZE` - 批量大小（默认: 1000）
 - `WIKI_SNAPSHOT_FILE` - 快照文件路径（默认: `${LOG_DIR}/upload_snapshot.json`）
@@ -111,8 +111,8 @@ API_KEY=xxx HOST=xxx DATASET_ID=xxx BATCH_SIZE=1000 ./scripts/tools.sh reparse-f
 
 ### 重新解析失败文档相关
 
-- `API_KEY` - API Key（默认: ragflow-HeewVgbFXZ1xiebiiHEzhxmZAQb-kOLXBa5WxEVe0JU）
-- `HOST` - 服务器地址（默认: http://6.13.51.232:9385）
+- `API_KEY` - API Key
+- `HOST` - 服务器地址（默认: http://127.0.0.1:9380）
 - `DATASET_ID` - 数据集 ID（必需）
 - `BATCH_SIZE` - 批量大小（默认: 50）
 
