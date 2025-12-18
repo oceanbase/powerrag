@@ -116,6 +116,19 @@ FAILED_TASKS = 0
 
 CURRENT_TASKS = {}
 
+# Task stage definitions - based on actual code execution flow
+class TaskStage:
+    BUILD_CHUNKS = "build_chunks"        # 文档处理（加载、解析、分块）
+    EMBEDDING = "embedding"              # 向量嵌入生成
+    INSERT_INDEX = "insert_index"        # 索引插入
+    RAPTOR = "raptor"                    # RAPTOR处理
+    GRAPHRAG = "graphrag"                # GraphRAG处理
+    DATAFLOW = "dataflow"                # Dataflow Pipeline处理
+
+# Task statistics: {task_type: {"total_time": float, "count": int, "tasks": [(start_time, duration)], "stages": {...}}}
+TASK_STATISTICS = {}
+TASK_STATISTICS_LOCK = threading.Lock()
+
 MAX_CONCURRENT_TASKS = int(os.environ.get('MAX_CONCURRENT_TASKS', "5"))
 MAX_CONCURRENT_CHUNK_BUILDERS = int(os.environ.get('MAX_CONCURRENT_CHUNK_BUILDERS', "1"))
 MAX_CONCURRENT_MINIO = int(os.environ.get('MAX_CONCURRENT_MINIO', '10'))
@@ -133,6 +146,109 @@ def signal_handler(sig, frame):
     stop_event.set()
     time.sleep(1)
     sys.exit(0)
+
+
+def record_task_statistics(task_type, duration, stage_timings=None):
+    """Record task execution statistics.
+    
+    Args:
+        task_type: Type of task
+        duration: Total task duration
+        stage_timings: Dict of stage name to duration, e.g. {"load_document": 1.2, "parse_document": 3.4}
+    """
+    global TASK_STATISTICS
+    with TASK_STATISTICS_LOCK:
+        if task_type not in TASK_STATISTICS:
+            TASK_STATISTICS[task_type] = {
+                "total_time": 0.0,
+                "count": 0,
+                "tasks": [],
+                "stages": {}
+            }
+        
+        TASK_STATISTICS[task_type]["total_time"] += duration
+        TASK_STATISTICS[task_type]["count"] += 1
+        TASK_STATISTICS[task_type]["tasks"].append((datetime.now().timestamp(), duration))
+        
+        # Record stage timings
+        if stage_timings:
+            for stage_name, stage_duration in stage_timings.items():
+                if stage_name not in TASK_STATISTICS[task_type]["stages"]:
+                    TASK_STATISTICS[task_type]["stages"][stage_name] = {
+                        "total_time": 0.0,
+                        "count": 0,
+                        "tasks": []
+                    }
+                TASK_STATISTICS[task_type]["stages"][stage_name]["total_time"] += stage_duration
+                TASK_STATISTICS[task_type]["stages"][stage_name]["count"] += 1
+                TASK_STATISTICS[task_type]["stages"][stage_name]["tasks"].append(
+                    (datetime.now().timestamp(), stage_duration)
+                )
+        
+        # Keep only recent tasks (last 10 minutes for history)
+        cutoff_time = datetime.now().timestamp() - 600
+        TASK_STATISTICS[task_type]["tasks"] = [
+            (ts, dur) for ts, dur in TASK_STATISTICS[task_type]["tasks"] 
+            if ts > cutoff_time
+        ]
+        
+        # Clean up stage tasks older than 10 minutes
+        for stage_name in TASK_STATISTICS[task_type]["stages"]:
+            TASK_STATISTICS[task_type]["stages"][stage_name]["tasks"] = [
+                (ts, dur) for ts, dur in TASK_STATISTICS[task_type]["stages"][stage_name]["tasks"]
+                if ts > cutoff_time
+            ]
+
+
+def get_task_statistics_summary():
+    """Get summary of task statistics."""
+    global TASK_STATISTICS
+    with TASK_STATISTICS_LOCK:
+        summary = {}
+        now = datetime.now().timestamp()
+        
+        for task_type, stats in TASK_STATISTICS.items():
+            # Overall statistics
+            total_count = stats["count"]
+            total_time = stats["total_time"]
+            avg_time = total_time / total_count if total_count > 0 else 0
+            
+            # Recent statistics (last 5 minutes)
+            recent_cutoff = now - 300  # 5 minutes
+            recent_tasks = [(ts, dur) for ts, dur in stats["tasks"] if ts > recent_cutoff]
+            recent_count = len(recent_tasks)
+            recent_time = sum(dur for _, dur in recent_tasks)
+            recent_avg = recent_time / recent_count if recent_count > 0 else 0
+            
+            # Stage statistics
+            stage_summary = {}
+            for stage_name, stage_stats in stats.get("stages", {}).items():
+                stage_total_count = stage_stats["count"]
+                stage_total_time = stage_stats["total_time"]
+                stage_avg_time = stage_total_time / stage_total_count if stage_total_count > 0 else 0
+                
+                # Recent stage statistics (last 5 minutes)
+                stage_recent_tasks = [(ts, dur) for ts, dur in stage_stats["tasks"] if ts > recent_cutoff]
+                stage_recent_count = len(stage_recent_tasks)
+                stage_recent_time = sum(dur for _, dur in stage_recent_tasks)
+                stage_recent_avg = stage_recent_time / stage_recent_count if stage_recent_count > 0 else 0
+                
+                stage_summary[stage_name] = {
+                    "total_count": stage_total_count,
+                    "total_avg_time": stage_avg_time,
+                    "recent_5min_count": stage_recent_count,
+                    "recent_5min_avg_time": stage_recent_avg
+                }
+            
+            summary[task_type] = {
+                "total_count": total_count,
+                "total_avg_time": avg_time,
+                "recent_5min_count": recent_count,
+                "recent_5min_avg_time": recent_avg,
+                "stages": stage_summary
+            }
+        
+        return summary
 
 
 
@@ -811,10 +927,12 @@ async def insert_es(task_id, task_tenant_id, task_dataset_id, chunks, progress_c
 @timeout(60*60*3, 1)
 async def do_handle_task(task):
     task_type = task.get("task_type", "")
+    stage_timings = {}
+    stage_start_time = None
 
     if task_type == "dataflow" and task.get("doc_id", "") == CANVAS_DEBUG_DOC_ID:
         await run_dataflow(task)
-        return
+        return stage_timings
 
     task_id = task["id"]
     task_from_page = task["from_page"]
@@ -860,14 +978,16 @@ async def do_handle_task(task):
     init_kb(task, vector_size)
 
     if task_type[:len("dataflow")] == "dataflow":
+        stage_start_time = timer()
         await run_dataflow(task)
-        return
+        stage_timings[TaskStage.DATAFLOW] = timer() - stage_start_time
+        return stage_timings
 
     if task_type == "raptor":
         ok, kb = KnowledgebaseService.get_by_id(task_dataset_id)
         if not ok:
             progress_callback(prog=-1.0, msg="Cannot found valid knowledgebase for RAPTOR task")
-            return
+            return stage_timings
 
         kb_parser_config = kb.parser_config
         if not kb_parser_config.get("raptor", {}).get("use_raptor", False):
@@ -886,11 +1006,12 @@ async def do_handle_task(task):
             )
             if not KnowledgebaseService.update_by_id(kb.id, {"parser_config":kb_parser_config}):
                 progress_callback(prog=-1.0, msg="Internal error: Invalid RAPTOR configuration")
-                return
+                return stage_timings
 
         # bind LLM for raptor
         chat_model = LLMBundle(task_tenant_id, LLMType.CHAT, llm_name=task_llm_id, lang=task_language)
         # run RAPTOR
+        stage_start_time = timer()
         async with kg_limiter:
             chunks, token_count = await run_raptor_for_kb(
                 row=task,
@@ -901,6 +1022,7 @@ async def do_handle_task(task):
                 callback=progress_callback,
                 doc_ids=task.get("doc_ids", []),
             )
+        stage_timings[TaskStage.RAPTOR] = timer() - stage_start_time
         if fake_doc_ids := task.get("doc_ids", []):
             task_doc_id = fake_doc_ids[0] # use the first document ID to represent this task for logging purposes
     # Either using graphrag or Standard chunking methods
@@ -908,7 +1030,7 @@ async def do_handle_task(task):
         ok, kb = KnowledgebaseService.get_by_id(task_dataset_id)
         if not ok:
             progress_callback(prog=-1.0, msg="Cannot found valid knowledgebase for GraphRAG task")
-            return
+            return stage_timings
 
         kb_parser_config = kb.parser_config
         if not kb_parser_config.get("graphrag", {}).get("use_graphrag", False):
@@ -929,16 +1051,16 @@ async def do_handle_task(task):
             )
             if not KnowledgebaseService.update_by_id(kb.id, {"parser_config":kb_parser_config}):
                 progress_callback(prog=-1.0, msg="Internal error: Invalid GraphRAG configuration")
-                return
+                return stage_timings
 
 
         graphrag_conf = kb_parser_config.get("graphrag", {})
-        start_ts = timer()
         chat_model = LLMBundle(task_tenant_id, LLMType.CHAT, llm_name=task_llm_id, lang=task_language)
         with_resolution = graphrag_conf.get("resolution", False)
         with_community = graphrag_conf.get("community", False)
+        
+        stage_start_time = timer()
         async with kg_limiter:
-            # await run_graphrag(task, task_language, with_resolution, with_community, chat_model, embedding_model, progress_callback)
             result = await run_graphrag_for_kb(
                 row=task,
                 doc_ids=task.get("doc_ids", []),
@@ -951,22 +1073,28 @@ async def do_handle_task(task):
                 with_community=with_community,
             )
             logging.info(f"GraphRAG task result for task {task}:\n{result}")
-        progress_callback(prog=1.0, msg="Knowledge Graph done ({:.2f}s)".format(timer() - start_ts))
-        return
+        stage_timings[TaskStage.GRAPHRAG] = timer() - stage_start_time
+        progress_callback(prog=1.0, msg="Knowledge Graph done ({:.2f}s)".format(stage_timings[TaskStage.GRAPHRAG]))
+        return stage_timings
     elif task_type == "mindmap":
         progress_callback(1, "place holder")
         pass
-        return
+        return stage_timings
     else:
         # Standard chunking methods
-        start_ts = timer()
+        # Stage 1: Build chunks (load document + parse + chunk)
+        stage_start_time = timer()
         chunks = await build_chunks(task, progress_callback)
-        logging.info("Build document {}: {:.2f}s".format(task_document_name, timer() - start_ts))
+        stage_timings[TaskStage.BUILD_CHUNKS] = timer() - stage_start_time
+        
+        logging.info("Build document {}: {:.2f}s".format(task_document_name, stage_timings[TaskStage.BUILD_CHUNKS]))
         if not chunks:
             progress_callback(1., msg=f"No chunk built from {task_document_name}")
-            return
+            return stage_timings
         progress_callback(msg="Generate {} chunks".format(len(chunks)))
-        start_ts = timer()
+        
+        # Stage 2: Embedding
+        stage_start_time = timer()
         try:
             token_count, vector_size = await embedding(chunks, embedding_model, task_parser_config, progress_callback)
         except Exception as e:
@@ -975,32 +1103,35 @@ async def do_handle_task(task):
             logging.exception(error_message)
             token_count = 0
             raise
-        progress_message = "Embedding chunks ({:.2f}s)".format(timer() - start_ts)
+        stage_timings[TaskStage.EMBEDDING] = timer() - stage_start_time
+        progress_message = "Embedding chunks ({:.2f}s)".format(stage_timings[TaskStage.EMBEDDING])
         logging.info(progress_message)
         progress_callback(msg=progress_message)
         if task["parser_id"].lower() == "naive" and task["parser_config"].get("toc_extraction", False):
             toc_thread = executor.submit(build_TOC,task, chunks, progress_callback)
 
     chunk_count = len(set([chunk["id"] for chunk in chunks]))
-    start_ts = timer()
+    
+    # Stage 3: Insert to index (Elasticsearch/Infinity)
+    stage_start_time = timer()
     e = await insert_es(task_id, task_tenant_id, task_dataset_id, chunks, progress_callback)
     if not e:
-        return
+        return stage_timings
+    stage_timings[TaskStage.INSERT_INDEX] = timer() - stage_start_time
 
     logging.info("Indexing doc({}), page({}-{}), chunks({}), elapsed: {:.2f}".format(task_document_name, task_from_page,
                                                                                      task_to_page, len(chunks),
-                                                                                     timer() - start_ts))
+                                                                                     stage_timings[TaskStage.INSERT_INDEX]))
 
     DocumentService.increment_chunk_num(task_doc_id, task_dataset_id, token_count, chunk_count, 0)
 
-    time_cost = timer() - start_ts
-    progress_callback(msg="Indexing done ({:.2f}s).".format(time_cost))
+    progress_callback(msg="Indexing done ({:.2f}s).".format(stage_timings[TaskStage.INSERT_INDEX]))
     if toc_thread:
         d = toc_thread.result()
         if d:
             e = await insert_es(task_id, task_tenant_id, task_dataset_id, [d], progress_callback)
             if not e:
-                return
+                return stage_timings
             DocumentService.increment_chunk_num(task_doc_id, task_dataset_id, 0, 1, 0)
 
     task_time_cost = timer() - task_start_ts
@@ -1009,6 +1140,8 @@ async def do_handle_task(task):
         "Chunk doc({}), page({}-{}), chunks({}), token({}), elapsed:{:.2f}".format(task_document_name, task_from_page,
                                                                                    task_to_page, len(chunks),
                                                                                    token_count, task_time_cost))
+    
+    return stage_timings
 
 
 async def handle_task():
@@ -1021,12 +1154,17 @@ async def handle_task():
 
     task_type = task["task_type"]
     pipeline_task_type = TASK_TYPE_TO_PIPELINE_TASK_TYPE.get(task_type, PipelineTaskType.PARSE) or PipelineTaskType.PARSE
+    
+    task_start_time = timer()
+    task_success = False
+    stage_timings = {}
 
     try:
         logging.info(f"handle_task begin for task {json.dumps(task)}")
         CURRENT_TASKS[task["id"]] = copy.deepcopy(task)
-        await do_handle_task(task)
+        stage_timings = await do_handle_task(task)
         DONE_TASKS += 1
+        task_success = True
         CURRENT_TASKS.pop(task["id"], None)
         logging.info(f"handle_task done for task {json.dumps(task)}")
     except Exception as e:
@@ -1042,6 +1180,11 @@ async def handle_task():
             pass
         logging.exception(f"handle_task got exception for task {json.dumps(task)}")
     finally:
+        # Record task statistics
+        task_duration = timer() - task_start_time
+        if task_success:
+            record_task_statistics(task_type, task_duration, stage_timings)
+        
         task_document_ids = []
         if task_type in ["graphrag", "raptor", "mindmap"]:
             task_document_ids = task["doc_ids"]
@@ -1116,6 +1259,55 @@ async def report_status():
         await trio.sleep(30)
 
 
+async def report_task_statistics():
+    """Report task statistics every 5 minutes."""
+    await trio.sleep(300)  # Wait 5 minutes before first report
+    
+    # Stage name mapping for display
+    stage_display_names = {
+        TaskStage.BUILD_CHUNKS: "文档处理",
+        TaskStage.EMBEDDING: "向量嵌入",
+        TaskStage.INSERT_INDEX: "索引插入",
+        TaskStage.RAPTOR: "RAPTOR处理",
+        TaskStage.GRAPHRAG: "GraphRAG处理",
+        TaskStage.DATAFLOW: "Dataflow处理"
+    }
+    
+    while True:
+        try:
+            summary = get_task_statistics_summary()
+            
+            if not summary:
+                logging.info("=" * 80)
+                logging.info("TASK STATISTICS REPORT - No tasks processed yet")
+                logging.info("=" * 80)
+            else:
+                logging.info("=" * 80)
+                logging.info("TASK STATISTICS REPORT")
+                logging.info("=" * 80)
+                
+                for task_type, stats in summary.items():
+                    logging.info(f"\nTask Type: {task_type}")
+                    logging.info(f"  Total processed: {stats['total_count']} tasks, avg time: {stats['total_avg_time']:.2f}s")
+                    logging.info(f"  Last 5 minutes: {stats['recent_5min_count']} tasks, avg time: {stats['recent_5min_avg_time']:.2f}s")
+                    
+                    # Display stage statistics
+                    if stats.get('stages'):
+                        logging.info(f"\n  Stage breakdown:")
+                        for stage_name, stage_stats in stats['stages'].items():
+                            display_name = stage_display_names.get(stage_name, stage_name)
+                            logging.info(f"    [{display_name}]")
+                            logging.info(f"      Total: {stage_stats['total_count']} times, avg: {stage_stats['total_avg_time']:.2f}s")
+                            logging.info(f"      Last 5min: {stage_stats['recent_5min_count']} times, avg: {stage_stats['recent_5min_avg_time']:.2f}s")
+                
+                logging.info("\n" + "=" * 80)
+                
+        except Exception:
+            logging.exception("report_task_statistics got exception")
+        
+        await trio.sleep(300)  # Report every 5 minutes
+
+
 async def task_manager():
     try:
         await handle_task()
@@ -1150,6 +1342,7 @@ async def main():
 
     async with trio.open_nursery() as nursery:
         nursery.start_soon(report_status)
+        nursery.start_soon(report_task_statistics)
         while not stop_event.is_set():
             await task_limiter.acquire()
             nursery.start_soon(task_manager)

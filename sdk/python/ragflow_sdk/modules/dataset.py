@@ -62,6 +62,25 @@ class DataSet(Base):
                 doc_list.append(document)
             return doc_list
         raise Exception(res.get("message"))
+    
+    def upload_documents_with_meta(self, document_list: list[dict], group_id_field: str = None, file_extension: str = "html"):
+        url = f"/datasets/{self.id}/documents_with_meta"
+        docs = []
+        for ele in document_list:
+            docs.append({
+                "title": ele["title"],
+                "content": ele["content"],
+                "metadata": ele.get("metadata", {}),
+            })
+        res = self.post(path=url, json={"docs": docs, "group_id_field": group_id_field, "file_extension": file_extension})
+        res = res.json()
+        if res.get("code") == 0:
+            doc_list = []
+            for doc in res["data"]:
+                document = Document(self.rag, doc)
+                doc_list.append(document)
+            return doc_list
+        raise Exception(res.get("message"))
 
     def list_documents(
         self,
@@ -87,13 +106,27 @@ class DataSet(Base):
             "create_time_to": create_time_to,
         }
         res = self.get(f"/datasets/{self.id}/documents", params=params)
-        res = res.json()
+        
+        # Check response status code
+        if res.status_code != 200:
+            raise Exception(f"API request failed with status code {res.status_code}: {res.text[:500]}")
+        
+        # Check if response body is empty
+        if not res.text or not res.text.strip():
+            raise Exception(f"API returned empty response (status {res.status_code}). URL: {res.url}")
+        
+        # Try to parse JSON
+        try:
+            res_json = res.json()
+        except Exception as e:
+            raise Exception(f"Failed to parse JSON response (status {res.status_code}): {str(e)}. Response text: {res.text[:500]}")
+        
         documents = []
-        if res.get("code") == 0:
-            for document in res["data"].get("docs"):
+        if res_json.get("code") == 0:
+            for document in res_json.get("data", {}).get("docs", []):
                 documents.append(Document(self.rag, document))
             return documents
-        raise Exception(res["message"])
+        raise Exception(res_json.get("message", "Unknown error"))
 
     def delete_documents(self, ids: list[str] | None = None):
         res = self.rm(f"/datasets/{self.id}/documents", {"ids": ids})

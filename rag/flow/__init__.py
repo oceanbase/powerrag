@@ -17,6 +17,7 @@
 import importlib
 import inspect
 import pkgutil
+import logging
 from pathlib import Path
 from types import ModuleType
 from typing import Dict, Type
@@ -25,6 +26,7 @@ __all_classes: Dict[str, Type] = {}
 
 _pkg_dir = Path(__file__).resolve().parent
 _pkg_name = __name__
+_logger = logging.getLogger(__name__)
 
 
 def _should_skip_module(mod_name: str) -> bool:
@@ -41,7 +43,9 @@ def _import_submodules() -> None:
             module = importlib.import_module(mod_name)
             _extract_classes_from_module(module)  # noqa: F821
         except ImportError as e:
-            print(f"Warning: Failed to import module {mod_name}: {e}")
+            # Some flow modules are optional and may depend on system libraries.
+            # Keep this quiet by default to avoid spamming debug console.
+            _logger.debug("Optional flow module import failed: %s (%s)", mod_name, e)
 
 
 def _extract_classes_from_module(module: ModuleType) -> None:

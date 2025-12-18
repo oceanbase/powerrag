@@ -250,11 +250,16 @@ class RetryingPooledMySQLDatabase(PooledMySQLDatabase):
             try:
                 return super().execute_sql(sql, params, commit)
             except (OperationalError, InterfaceError) as e:
-                error_codes = [2013, 2006]
+                # MySQL/OceanBase error codes that should trigger retry:
+                # 2013: Lost connection to MySQL server during query
+                # 2006: MySQL server has gone away
+                # 0: General connection error (empty connection)
+                # Note: 1317 (Query execution timeout) should NOT be retried
+                error_codes = [2013, 2006, 0]
                 error_messages = ['', 'Lost connection']
                 should_retry = (
                     (hasattr(e, 'args') and e.args and e.args[0] in error_codes) or
-                    (str(e) in error_messages) or
+                    any(msg in str(e) for msg in error_messages if msg) or
                     (hasattr(e, '__class__') and e.__class__.__name__ == 'InterfaceError')
                 )
 
@@ -288,18 +293,18 @@ class RetryingPooledMySQLDatabase(PooledMySQLDatabase):
             try:
                 return super().begin()
             except (OperationalError, InterfaceError) as e:
-                error_codes = [2013, 2006]
+                error_codes = [2013, 2006, 0]
                 error_messages = ['', 'Lost connection']
 
                 should_retry = (
                     (hasattr(e, 'args') and e.args and e.args[0] in error_codes) or
-                    (str(e) in error_messages) or
+                    any(msg in str(e) for msg in error_messages if msg) or
                     (hasattr(e, '__class__') and e.__class__.__name__ == 'InterfaceError')
                 )
 
                 if should_retry and attempt < self.max_retries:
                     logging.warning(
-                        f"Lost connection during transaction (attempt {attempt+1}/{self.max_retries})"
+                        f"Lost connection during transaction (attempt {attempt+1}/{self.max_retries}): {e}"
                     )
                     self._handle_connection_loss()
                     time.sleep(self.retry_delay * (2 ** attempt))

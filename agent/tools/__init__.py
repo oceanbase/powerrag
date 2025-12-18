@@ -16,11 +16,13 @@
 import os
 import importlib
 import inspect
+import logging
 from types import ModuleType
 from typing import Dict, Type
 
 _package_path = os.path.dirname(__file__)
 __all_classes: Dict[str, Type] = {}
+_logger = logging.getLogger(__name__)
 
 def _import_submodules() -> None:
     for filename in os.listdir(_package_path): # noqa: F821
@@ -32,7 +34,9 @@ def _import_submodules() -> None:
             module = importlib.import_module(f".{module_name}", package=__name__)
             _extract_classes_from_module(module)  # noqa: F821
         except ImportError as e:
-            print(f"Warning: Failed to import module {module_name}: {str(e)}")
+            # Optional tools may depend on external/system libraries (e.g. ODBC).
+            # Keep this quiet by default to avoid spamming debug console.
+            _logger.debug("Optional tool module import failed: %s (%s)", module_name, e)
 
 def _extract_classes_from_module(module: ModuleType) -> None:
     for name, obj in inspect.getmembers(module):

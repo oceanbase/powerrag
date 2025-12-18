@@ -433,8 +433,15 @@ class FileService(CommonService):
         safe_parent_path = sanitize_path(parent_path)
 
         err, files = [], []
-        for file in file_objs:
+        for file_item in file_objs:
             try:
+                # Support both file object and (file_obj, metadata) tuple
+                metadata = {}
+                if isinstance(file_item, tuple):
+                    file, metadata = file_item
+                else:
+                    file = file_item
+                
                 DocumentService.check_doc_health(kb.tenant_id, file.filename)
                 filename = duplicate_name(DocumentService.query, name=file.filename, kb_id=kb.id)
                 filetype = filename_type(filename)
@@ -472,6 +479,7 @@ class FileService(CommonService):
                     "location": location,
                     "size": len(blob),
                     "thumbnail": thumbnail_location,
+                    "meta_fields": metadata if metadata else {}
                 }
                 DocumentService.insert(doc)
 

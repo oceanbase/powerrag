@@ -202,3 +202,7 @@ docker/.env
 docker/launch_backend_service.sh
 docker/.env.oceanbase
 local.service_conf.yaml
+
+logs/
+pods/
+upload_wiki_json.pid

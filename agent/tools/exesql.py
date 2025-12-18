@@ -20,7 +20,6 @@ from abc import ABC
 import pandas as pd
 import pymysql
 import psycopg2
-import pyodbc
 from agent.tools.base import ToolParamBase, ToolBase, ToolMeta
 from common.connection_utils import timeout
 
@@ -124,6 +123,15 @@ class ExeSQL(ToolBase, ABC):
             db = psycopg2.connect(dbname=self._param.database, user=self._param.username, host=self._param.host,
                                   port=self._param.port, password=self._param.password)
         elif self._param.db_type == 'mssql':
+            try:
+                import pyodbc  # lazy import: requires system libodbc.so.2 (unixODBC)
+            except Exception as e:
+                raise Exception(
+                    "Missing dependency for MSSQL: 'pyodbc' and/or system ODBC library.\n"
+                    "Install Python package: pip install pyodbc\n"
+                    "Install system library providing libodbc.so.2 (e.g. unixODBC).\n"
+                    f"Original error: {e}"
+                )
             conn_str = (
                     r'DRIVER={ODBC Driver 17 for SQL Server};'
                     r'SERVER=' + self._param.host + ',' + str(self._param.port) + ';'
