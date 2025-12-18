@@ -212,7 +212,7 @@ class EntityResolution(Extractor):
         ans_list = []
         records = [r.strip() for r in results.split(record_delimiter)]
         for record in records:
-            pattern_int = f"{re.escape(entity_index_delimiter)}(\d+){re.escape(entity_index_delimiter)}"
+            pattern_int = rf"{re.escape(entity_index_delimiter)}(\d+){re.escape(entity_index_delimiter)}"
             match_int = re.search(pattern_int, record)
             res_int = int(str(match_int.group(1) if match_int else '0'))
             if res_int > records_length:
@@ -253,4 +253,3 @@ class EntityResolution(Extractor):
             return len(a & b) > 1
 
         return len(a & b)*1./max_l >= 0.8
-

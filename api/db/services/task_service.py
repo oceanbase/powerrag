@@ -175,6 +175,37 @@ class TaskService(CommonService):
 
     @classmethod
     @DB.connection_context()
+    def get_tasks_by_doc_ids(cls, doc_ids: list):
+        """Retrieve all tasks associated with multiple documents.
+
+        This method fetches all processing tasks for given documents in batch,
+        ordered by page number and creation time. It includes task progress and chunk information.
+
+        Args:
+            doc_ids (list): List of document IDs.
+
+        Returns:
+            list[dict]: List of task dictionaries containing task details with doc_id field.
+        """
+        if not doc_ids:
+            return []
+        
+        fields = [
+            cls.model.id,
+            cls.model.doc_id,
+            cls.model.from_page,
+            cls.model.progress,
+            cls.model.digest,
+            cls.model.chunk_ids,
+        ]
+        tasks = (
+            cls.model.select(*fields).order_by(cls.model.from_page.asc(), cls.model.create_time.desc())
+            .where(cls.model.doc_id.in_(doc_ids))
+        )
+        return list(tasks.dicts())
+
+    @classmethod
+    @DB.connection_context()
     def update_chunk_ids(cls, id: str, chunk_ids: str):
         """Update the chunk IDs associated with a task.
 
@@ -266,8 +297,7 @@ class TaskService(CommonService):
         """Update the progress information for a task.
 
         This method updates both the progress message and completion percentage of a task.
-        It handles platform-specific behavior (macOS vs others) and uses database locking
-        when necessary to ensure thread safety.
+        It handles platform-specific behavior (macOS vs others) with optimized locking strategy.
 
         Update Rules:
             - progress_msg: Always appends the new message to the existing one, and trims the result to max 3000 lines.
@@ -286,33 +316,24 @@ class TaskService(CommonService):
             logging.warning("Update_progress error: task not found")
             return
 
-        if os.environ.get("MACOS"):
-            if info["progress_msg"]:
-                progress_msg = trim_header_by_lines(task.progress_msg + "\n" + info["progress_msg"], 3000)
-                cls.model.update(progress_msg=progress_msg).where(cls.model.id == id).execute()
-            if "progress" in info:
-                prog = info["progress"]
-                cls.model.update(progress=prog).where(
-                    (cls.model.id == id) &
-                    (
-                            (cls.model.progress != -1) &
-                            ((prog == -1) | (prog > cls.model.progress))
-                    )
-                ).execute()
-        else:
-            with DB.lock("update_progress", -1):
-                if info["progress_msg"]:
-                    progress_msg = trim_header_by_lines(task.progress_msg + "\n" + info["progress_msg"], 3000)
-                    cls.model.update(progress_msg=progress_msg).where(cls.model.id == id).execute()
-                if "progress" in info:
-                    prog = info["progress"]
-                    cls.model.update(progress=prog).where(
-                        (cls.model.id == id) &
-                        (
-                            (cls.model.progress != -1) &
-                            ((prog == -1) | (prog > cls.model.progress))
-                        )
-                    ).execute()
+        # Note: No locking needed here because:
+        # 1. progress update: WHERE clause ensures atomic compare-and-swap at DB level
+        # 2. progress_msg update: Read-Modify-Write race is acceptable (it's just logs)
+        #    - Even if concurrent updates cause some messages to be lost, it doesn't affect functionality
+        
+        if info.get("progress_msg"):
+            progress_msg = trim_header_by_lines(task.progress_msg + "\n" + info["progress_msg"], 3000)
+            cls.model.update(progress_msg=progress_msg).where(cls.model.id == id).execute()
+        
+        if "progress" in info:
+            prog = info["progress"]
+            cls.model.update(progress=prog).where(
+                (cls.model.id == id) &
+                (
+                    (cls.model.progress != -1) &
+                    ((prog == -1) | (prog > cls.model.progress))
+                )
+            ).execute()
 
         process_duration = (datetime.now() - task.begin_at).total_seconds()
         cls.model.update(process_duration=process_duration).where(cls.model.id == id).execute()
@@ -427,6 +448,153 @@ def queue_tasks(doc: dict, bucket: str, name: str, priority: int):
     DocumentService.begin2parse(doc["id"])
 
     unfinished_task_array = [task for task in parse_task_array if task["progress"] < 1.0]
+    for unfinished_task in unfinished_task_array:
+        assert REDIS_CONN.queue_product(
+            settings.get_svr_queue_name(priority), message=unfinished_task
+        ), "Can't access Redis. Please check the Redis' status."
+
+
+def queue_tasks_batch(docs_with_storage: list[tuple[dict, str, str]], priority: int = 0):
+    """Batch create and queue document processing tasks for multiple documents.
+    
+    This function optimizes the task creation process by handling multiple documents
+    at once, reducing database queries and improving overall performance.
+    
+    Args:
+        docs_with_storage: List of tuples containing (doc, bucket, name) for each document
+        priority: Priority level for task queueing (default is 0)
+    """
+    if not docs_with_storage:
+        return
+    
+    # First, queue PowerRAG tasks for all documents
+    for doc, bucket, name in docs_with_storage:
+        queue_powerrag_tasks(doc)
+    
+    # Collect all document IDs for batch operations
+    doc_ids = [doc["id"] for doc, _, _ in docs_with_storage]
+    
+    # Batch get previous tasks
+    prev_tasks_dict = {}
+    if doc_ids:
+        prev_tasks_list = TaskService.get_tasks_by_doc_ids(doc_ids)
+        for task in prev_tasks_list:
+            doc_id = task["doc_id"]
+            if doc_id not in prev_tasks_dict:
+                prev_tasks_dict[doc_id] = []
+            prev_tasks_dict[doc_id].append(task)
+    
+    # Batch get chunking configs
+    chunking_configs = DocumentService.get_chunking_configs(doc_ids)
+    
+    # Process each document
+    all_parse_tasks = []
+    doc_chunk_nums = {}
+    pre_chunk_ids_to_delete = []
+    
+    for doc, bucket, name in docs_with_storage:
+        doc_id = doc["id"]
+        
+        def new_task():
+            return {
+                "id": get_uuid(),
+                "doc_id": doc_id,
+                "progress": 0.0,
+                "from_page": 0,
+                "to_page": 100000000,
+                "begin_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        
+        parse_task_array = []
+        
+        if doc["type"] == FileType.PDF.value:
+            file_bin = settings.STORAGE_IMPL.get(bucket, name)
+            do_layout = doc["parser_config"].get("layout_recognize", "DeepDOC")
+            pages = PdfParser.total_page_number(doc["name"], file_bin)
+            if pages is None:
+                pages = 0
+            page_size = doc["parser_config"].get("task_page_size") or 12
+            if doc["parser_id"] == "paper":
+                page_size = doc["parser_config"].get("task_page_size") or 22
+            if doc["parser_id"] in ["one", "knowledge_graph"] or do_layout != "DeepDOC" or doc["parser_config"].get("toc_extraction", False):
+                page_size = 10 ** 9
+            page_ranges = doc["parser_config"].get("pages") or [(1, 10 ** 5)]
+            for s, e in page_ranges:
+                s -= 1
+                s = max(0, s)
+                e = min(e - 1, pages)
+                for p in range(s, e, page_size):
+                    task = new_task()
+                    task["from_page"] = p
+                    task["to_page"] = min(p + page_size, e)
+                    parse_task_array.append(task)
+        
+        elif doc["parser_id"] == "table":
+            file_bin = settings.STORAGE_IMPL.get(bucket, name)
+            rn = RAGFlowExcelParser.row_number(doc["name"], file_bin)
+            for i in range(0, rn, 3000):
+                task = new_task()
+                task["from_page"] = i
+                task["to_page"] = min(i + 3000, rn)
+                parse_task_array.append(task)
+        else:
+            parse_task_array.append(new_task())
+        
+        chunking_config = chunking_configs[doc_id]
+        for task in parse_task_array:
+            hasher = xxhash.xxh64()
+            for field in sorted(chunking_config.keys()):
+                if field == "parser_config":
+                    for k in ["raptor", "graphrag"]:
+                        if k in chunking_config[field]:
+                            del chunking_config[field][k]
+                hasher.update(str(chunking_config[field]).encode("utf-8"))
+            for field in ["doc_id", "from_page", "to_page"]:
+                hasher.update(str(task.get(field, "")).encode("utf-8"))
+            task_digest = hasher.hexdigest()
+            task["digest"] = task_digest
+            task["progress"] = 0.0
+            task["priority"] = priority
+        
+        prev_tasks = prev_tasks_dict.get(doc_id, [])
+        ck_num = 0
+        if prev_tasks:
+            for task in parse_task_array:
+                ck_num += reuse_prev_task_chunks(task, prev_tasks, chunking_config)
+            pre_chunk_ids = []
+            for pre_task in prev_tasks:
+                if pre_task["chunk_ids"]:
+                    pre_chunk_ids.extend(pre_task["chunk_ids"].split())
+            if pre_chunk_ids:
+                pre_chunk_ids_to_delete.extend([
+                    (pre_chunk_ids, chunking_config["tenant_id"], chunking_config["kb_id"])
+                ])
+        
+        doc_chunk_nums[doc_id] = ck_num
+        all_parse_tasks.extend(parse_task_array)
+    
+    # Batch delete old tasks
+    if doc_ids:
+        TaskService.filter_delete([Task.doc_id.in_(doc_ids)])
+    
+    # Batch delete old chunks
+    for pre_chunk_ids, tenant_id, kb_id in pre_chunk_ids_to_delete:
+        settings.docStoreConn.delete({"id": pre_chunk_ids}, search.index_name(tenant_id), kb_id)
+    
+    # Batch update document chunk numbers
+    if doc_chunk_nums:
+        DocumentService.batch_update_chunk_num(doc_chunk_nums)
+    
+    # Batch insert tasks
+    if all_parse_tasks:
+        bulk_insert_into_db(Task, all_parse_tasks, True)
+    
+    # Batch update document status
+    if doc_ids:
+        DocumentService.batch_begin2parse(doc_ids)
+    
+    # Queue unfinished tasks
+    unfinished_task_array = [task for task in all_parse_tasks if task["progress"] < 1.0]
     for unfinished_task in unfinished_task_array:
         assert REDIS_CONN.queue_product(
             settings.get_svr_queue_name(priority), message=unfinished_task

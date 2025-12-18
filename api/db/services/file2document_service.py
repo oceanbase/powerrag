@@ -94,3 +94,50 @@ class File2DocumentService(CommonService):
         assert doc_id, "please specify doc_id"
         e, doc = DocumentService.get_by_id(doc_id)
         return doc.kb_id, doc.location
+
+    @classmethod
+    @DB.connection_context()
+    def get_storage_addresses(cls, doc_ids):
+        """Batch get storage addresses for multiple documents.
+        
+        Args:
+            doc_ids: List of document IDs
+            
+        Returns:
+            dict: Mapping of doc_id to (bucket, name) tuple
+        """
+        if not doc_ids:
+            return {}
+        
+        # Batch query file2document relationships
+        f2d_list = cls.model.select().where(cls.model.document_id.in_(doc_ids))
+        f2d_dict = {f2d.document_id: f2d for f2d in f2d_list}
+        
+        # Get file_ids for local files
+        file_ids = [f2d.file_id for f2d in f2d_list]
+        files_dict = {}
+        if file_ids:
+            files = File.select().where(File.id.in_(file_ids))
+            files_dict = {f.id: f for f in files}
+        
+        # Collect doc_ids that need to query document table
+        fallback_doc_ids = []
+        result = {}
+        
+        for doc_id in doc_ids:
+            if doc_id in f2d_dict:
+                f2d = f2d_dict[doc_id]
+                file = files_dict.get(f2d.file_id)
+                if file and (not file.source_type or file.source_type == FileSource.LOCAL):
+                    result[doc_id] = (file.parent_id, file.location)
+                    continue
+            fallback_doc_ids.append(doc_id)
+        
+        # Batch query documents for non-local files
+        if fallback_doc_ids:
+            from api.db.db_models import Document
+            docs = Document.select().where(Document.id.in_(fallback_doc_ids))
+            for doc in docs:
+                result[doc.id] = (doc.kb_id, doc.location)
+        
+        return result

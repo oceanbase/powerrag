@@ -564,6 +564,40 @@ class DocumentService(CommonService):
 
     @classmethod
     @DB.connection_context()
+    def get_chunking_configs(cls, doc_ids):
+        """Batch get chunking configs for multiple documents.
+        
+        Args:
+            doc_ids: List of document IDs
+            
+        Returns:
+            dict: Mapping of doc_id to chunking config
+        """
+        if not doc_ids:
+            return {}
+        
+        configs = (
+            cls.model.select(
+                cls.model.id,
+                cls.model.kb_id,
+                cls.model.parser_id,
+                cls.model.parser_config,
+                Knowledgebase.language,
+                Knowledgebase.embd_id,
+                Tenant.id.alias("tenant_id"),
+                Tenant.img2txt_id,
+                Tenant.asr_id,
+                Tenant.llm_id,
+            )
+            .join(Knowledgebase, on=(cls.model.kb_id == Knowledgebase.id))
+            .join(Tenant, on=(Knowledgebase.tenant_id == Tenant.id))
+            .where(cls.model.id.in_(doc_ids))
+        )
+        configs = configs.dicts()
+        return {config["id"]: config for config in configs}
+
+    @classmethod
+    @DB.connection_context()
     def get_doc_id_by_doc_name(cls, doc_name):
         fields = [cls.model.id]
         doc_id = cls.model.select(*fields) \
@@ -635,6 +669,60 @@ class DocumentService(CommonService):
             # keep the doc in DONE state when keep_progress=True for GraphRAG, RAPTOR and Mindmap tasks
 
         cls.update_by_id(doc_id, info)
+
+    @classmethod
+    @DB.connection_context()
+    def batch_update_chunk_num(cls, doc_chunk_nums):
+        """Batch update chunk_num for multiple documents.
+        
+        Args:
+            doc_chunk_nums: Dictionary mapping doc_id to chunk_num value
+        """
+        if not doc_chunk_nums:
+            return
+        
+        # Use CASE WHEN for efficient batch update
+        from common.time_utils import current_timestamp, datetime_format
+        doc_ids = list(doc_chunk_nums.keys())
+        
+        # Build CASE statement for chunk_num
+        case_stmt = Case(None, [
+            (cls.model.id == doc_id, chunk_num)
+            for doc_id, chunk_num in doc_chunk_nums.items()
+        ])
+        
+        # Perform batch update
+        cls.model.update(
+            chunk_num=case_stmt,
+            update_time=current_timestamp(),
+            update_date=datetime_format(datetime.now())
+        ).where(cls.model.id.in_(doc_ids)).execute()
+
+    @classmethod
+    @DB.connection_context()
+    def batch_begin2parse(cls, doc_ids, keep_progress=False):
+        """Batch update documents to begin parsing state.
+        
+        Args:
+            doc_ids: List of document IDs
+            keep_progress: Whether to keep existing progress
+        """
+        if not doc_ids:
+            return
+        
+        from common.time_utils import current_timestamp, datetime_format
+        
+        info = {
+            "progress_msg": "Task is queued...",
+            "process_begin_at": get_format_time(),
+            "update_time": current_timestamp(),
+            "update_date": datetime_format(datetime.now())
+        }
+        if not keep_progress:
+            info["progress"] = random.random() * 1 / 100.
+            info["run"] = TaskStatus.RUNNING.value
+        
+        cls.model.update(info).where(cls.model.id.in_(doc_ids)).execute()
 
     @classmethod
     @DB.connection_context()
