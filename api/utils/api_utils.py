@@ -307,7 +307,11 @@ def get_result(code=RetCode.SUCCESS, message="", data=None, total=None):
     else:
         response["message"] = message or "Error"
 
-    return jsonify(response)
+    # Use json.dumps with ensure_ascii=False to prevent Chinese characters from being escaped
+    return Response(
+        json.dumps(response, ensure_ascii=False, cls=CustomJSONEncoder),
+        mimetype="application/json"
+    )
 
 
 def get_error_data_result(

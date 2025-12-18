@@ -133,6 +133,32 @@ class KnowledgebaseService(CommonService):
 
     @classmethod
     @DB.connection_context()
+    def verify_documents_belong_to_kbs(cls, doc_ids, kb_ids):
+        # Verify that document IDs belong to the given knowledge base IDs
+        # Args:
+        #     doc_ids: List of document IDs to verify
+        #     kb_ids: List of knowledge base IDs
+        # Returns:
+        #     Tuple of (is_valid: bool, valid_doc_ids: list, invalid_doc_ids: list)
+        #     - is_valid: True if all doc_ids belong to kb_ids, False otherwise
+        #     - valid_doc_ids: List of document IDs that belong to kb_ids
+        #     - invalid_doc_ids: List of document IDs that do not belong to kb_ids
+        if not doc_ids or not kb_ids:
+            return False, [], doc_ids if doc_ids else []
+        
+        # Query documents that belong to the given kb_ids
+        valid_docs = Document.select(Document.id, Document.kb_id).where(
+            Document.id.in_(doc_ids),
+            Document.kb_id.in_(kb_ids)
+        )
+        valid_doc_ids = [doc.id for doc in valid_docs]
+        invalid_doc_ids = [doc_id for doc_id in doc_ids if doc_id not in valid_doc_ids]
+        is_valid = len(invalid_doc_ids) == 0
+        
+        return is_valid, valid_doc_ids, invalid_doc_ids
+
+    @classmethod
+    @DB.connection_context()
     def get_by_tenant_ids(cls, joined_tenant_ids, user_id,
                           page_number, items_per_page,
                           orderby, desc, keywords,

@@ -1,9 +1,15 @@
+// @ts-nocheck
 import path from 'path';
 import TerserPlugin from 'terser-webpack-plugin';
 import { defineConfig } from 'umi';
 import { appName } from './src/conf.json';
 import routes from './src/routes';
 const ESLintPlugin = require('eslint-webpack-plugin');
+
+const serverHost = process.env.SERVER_HOST_FOR_WEB || '127.0.0.1';
+const adminHost = process.env.ADMIN_HOST_FOR_WEB || '127.0.0.1';
+const serverPort = Number(process.env.SERVER_PORT_FOR_WEB || '') || 9380;
+const adminPort = Number(process.env.ADMIN_PORT_FOR_WEB || '') || 9381;
 
 export default defineConfig({
   title: appName,
@@ -40,14 +46,14 @@ export default defineConfig({
   proxy: [
     {
       context: ['/api/v1/admin'],
-      target: 'http://127.0.0.1:9381/',
+      target: `http://${adminHost}:${adminPort}/`,
       changeOrigin: true,
       ws: true,
       logger: console,
     },
     {
       context: ['/api', '/v1'],
-      target: 'http://127.0.0.1:9380',
+      target: `http://${serverHost}:${serverPort}`,
       changeOrigin: true,
       ws: true,
       logger: console,
