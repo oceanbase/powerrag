@@ -24,6 +24,14 @@ Usage: scripts/setup_venv.sh [--python /path/to/python] [--python-index N] [--li
 Creates/uses .venv, ensures uv is available, installs system deps (best-effort),
 then runs `uv sync`.
 
+When creating a new venv, the script will use --copies to create a self-contained
+venv (Python interpreter and standard library are copied, making the venv portable
+to other locations). Dependencies are then installed via `uv sync` based on
+pyproject.toml and uv.lock, ensuring a clean and reproducible environment.
+
+Note: The venv created with --copies can be moved to other machines with the
+same OS and architecture, but still requires compatible system libraries.
+
 Python selection:
   --python PATH       Use this python to create .venv (must be >= 3.10)
   --python-index N    Choose from auto-discovered candidates by index (see --list-pythons)
@@ -80,7 +88,7 @@ if ! have_cmd dnf && have_cmd yum; then
 fi
 have_cmd "$dnf_cmd" || { warn "dnf/yum not found; skipping system dependency installation"; return; }
 
-log "Installing system deps for building pyicu (ICU + pkg-config + toolchain) via $dnf_cmd"
+log "Installing system deps for building pyicu (ICU + pkg-config + toolchain) and OpenCV (OpenGL) via $dnf_cmd"
 
 # Some environments have broken optional repos (e.g., local CUDA repo path, nvidia repo SSL issues).
 local disablerepos=(
@@ -98,6 +106,7 @@ sudo -n "$dnf_cmd" -y "${disable_args[@]}" install \
   libicu-devel \
   pkgconf-pkg-config \
   gcc gcc-c++ make \
+  mesa-libGL \
   || die "Failed to install system deps. You may need to fix/disable broken yum repos."
 }
 
@@ -112,12 +121,13 @@ install_system_deps_debian() {
   fi
   have_cmd apt-get || { warn "apt-get not found; skipping system dependency installation"; return; }
 
-log "Installing system deps for building pyicu (ICU + pkg-config + toolchain) via apt-get"
+log "Installing system deps for building pyicu (ICU + pkg-config + toolchain) and OpenCV (OpenGL) via apt-get"
 sudo -n apt-get update -y
 sudo -n apt-get install -y \
   libicu-dev \
   pkg-config \
   build-essential \
+  libgl1 \
   || die "Failed to install system deps via apt-get"
 }
 
@@ -258,6 +268,13 @@ ensure_uv() {
     return 1
   fi
 
+  # Activate the virtual environment to ensure proper PATH and environment
+  local venv_activate="$PROJECT_ROOT/.venv/bin/activate"
+  if [ ! -f "$venv_activate" ]; then
+    echo "[setup_venv][ERROR] Virtual environment activation script not found at $venv_activate" >&2
+    return 1
+  fi
+
   local pip_log="$PROJECT_ROOT/.venv/uv_pip_install.log"
   : >"$pip_log" || true
 
@@ -279,9 +296,14 @@ ensure_uv() {
     "$venv_python" -m ensurepip --upgrade >/dev/null 2>&1 || true
   fi
 
-  # Emit full pip output for visibility and keep a copy on disk.
-  # -v provides detailed download/index logs.
-  if ! "$venv_python" -m pip install -v -U --force-reinstall uv 2>&1 | tee -a "$pip_log"; then
+  # Install uv with venv activated to ensure proper installation
+  # Use source to activate venv, then install uv
+  if ! (
+    set +u  # Temporarily disable unset variable check for venv activation
+    source "$venv_activate"
+    set -u  # Re-enable unset variable check
+    "$venv_python" -m pip install -U --force-reinstall uv >>"$pip_log" 2>&1
+  ); then
     echo "[setup_venv][ERROR] Failed to install 'uv' via pip." >&2
     echo "[setup_venv][ERROR] Your pip index/mirror may not provide the 'uv' package." >&2
     echo "[setup_venv][ERROR] See pip log: $pip_log" >&2
@@ -342,14 +364,35 @@ main() {
     *) warn "Unknown distro; skipping system dependency installation. If pyicu fails, install ICU dev libs + pkg-config manually." ;;
   esac
 
+  local py=""
   if [ -x "$PROJECT_ROOT/.venv/bin/python" ]; then
     log "Venv exists: $PROJECT_ROOT/.venv"
+    py="$PROJECT_ROOT/.venv/bin/python"
   else
-    local py
     py="$(select_python "$arg_python" "$arg_python_index")"
     log "Using Python: $py ($(python_major_minor "$py"))"
     log "Creating venv: $PROJECT_ROOT/.venv"
-    "$py" -m venv "$PROJECT_ROOT/.venv"
+    log "Using --copies to create a self-contained venv (can be moved to other locations)"
+    "$py" -m venv --copies "$PROJECT_ROOT/.venv"
+    
+    # Record venv creation info for portability reference
+    local venv_info_file="$PROJECT_ROOT/.venv/VENV_INFO.txt"
+    {
+      echo "Virtual Environment Creation Info"
+      echo "=================================="
+      echo "Created: $(date)"
+      echo "Source Python: $py"
+      echo "Python Version: $("$py" -c 'import sys; print(sys.version)' 2>/dev/null || echo "unknown")"
+      echo "Python Executable: $("$py" -c 'import sys; print(sys.executable)' 2>/dev/null || echo "unknown")"
+      echo "Platform: $("$py" -c 'import platform; print(platform.platform())' 2>/dev/null || echo "unknown")"
+      echo "Architecture: $("$py" -c 'import platform; print(platform.machine())' 2>/dev/null || echo "unknown")"
+      echo ""
+      echo "Note: This venv was created with --copies option, making it more portable."
+      echo "It can be moved to other machines with the same OS and architecture."
+      echo "However, compatible system libraries (e.g., libpython, libc) are still required."
+      echo ""
+      echo "Dependencies are managed by uv sync based on pyproject.toml and uv.lock."
+    } >"$venv_info_file" 2>/dev/null || true
   fi
 
   local uv_bin
@@ -367,7 +410,7 @@ main() {
   export CXXFLAGS="${CXXFLAGS:-"-include memory"}"
 
   log "Running: uv sync"
-  "$uv_bin" sync
+  "$uv_bin" sync --index-url https://mirrors.aliyun.com/pypi/simple/
 
   log "Done."
 }
