@@ -72,17 +72,151 @@ start_web() {
         return 1
     fi
 
-    echo "启动 Web 前端（正式）..."
+    echo "启动 Web 前端（生产模式）..."
     echo "  - 目录: ${WEB_DIR}"
     echo "  - 端口: ${WEB_PORT}"
 
-    # 注意：使用 `npx serve -s` 提供 SPA 回退（browser history）
-    # 这里会先构建再启动静态服务；如需跳过构建，请先手动执行 `cd web && npm run build`
-    nohup bash -lc "cd '${WEB_DIR}' && npm run build && npx --yes serve -s dist -l ${WEB_PORT}" > "${LOG_DIR}/web_frontend.log" 2>&1 &
+    # 检查并安装前端依赖
+    if [ ! -d "${WEB_DIR}/node_modules" ]; then
+        echo "检测到前端依赖未安装，正在安装..."
+        cd "${WEB_DIR}" && npm install || {
+            echo "前端依赖安装失败，请检查网络和 npm 配置"
+            return 1
+        }
+    fi
 
-    WEB_PID=$!
-    echo $WEB_PID > "${pid_file}"
-    echo "Web 前端已启动 (PID: ${WEB_PID})"
+    # 检查 nginx 是否已安装
+    if ! command -v nginx > /dev/null 2>&1; then
+        echo "错误: 未找到 nginx，请先安装 nginx"
+        echo "安装方法:"
+        echo "  Ubuntu/Debian: sudo apt-get install nginx"
+        echo "  CentOS/RHEL: sudo yum install nginx"
+        return 1
+    fi
+
+    # 构建生产版本
+    echo "正在构建生产版本..."
+    cd "${WEB_DIR}" && npm run build || {
+        echo "构建失败，请检查构建日志"
+        return 1
+    }
+
+    # 检查构建输出目录是否存在
+    if [ ! -d "${WEB_DIR}/dist" ]; then
+        echo "构建输出目录不存在: ${WEB_DIR}/dist"
+        return 1
+    fi
+
+    # 创建 nginx 配置目录
+    NGINX_CONF_DIR="${WORKSPACE_FOLDER}/nginx_conf"
+    mkdir -p "${NGINX_CONF_DIR}"
+
+    # 生成 nginx 配置文件
+    SERVER_HOST=${SERVER_HOST_FOR_WEB:-127.0.0.1}
+    SERVER_PORT=${SERVER_PORT_FOR_WEB:-9380}
+    ADMIN_HOST=${ADMIN_HOST_FOR_WEB:-127.0.0.1}
+    ADMIN_PORT=${ADMIN_PORT_FOR_WEB:-9381}
+
+    cat > "${NGINX_CONF_DIR}/ragflow.conf" <<EOF
+server {
+    listen ${WEB_PORT};
+    server_name _;
+    root ${WEB_DIR}/dist;
+
+    gzip on;
+    gzip_min_length 1k;
+    gzip_comp_level 9;
+    gzip_types text/plain application/javascript application/x-javascript text/css application/xml text/javascript application/x-httpd-php image/jpeg image/gif image/png;
+    gzip_vary on;
+    gzip_disable "MSIE [1-6]\\.";
+
+    location ~ ^/api/v1/admin {
+        proxy_pass http://${ADMIN_HOST}:${ADMIN_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location ~ ^/(v1|api) {
+        proxy_pass http://${SERVER_HOST}:${SERVER_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location / {
+        index index.html;
+        try_files \$uri \$uri/ /index.html;
+    }
+
+    # Cache-Control: max-age~@~AExpires
+    location ~ ^/static/(css|js|media)/ {
+        expires 10y;
+        access_log off;
+    }
+}
+EOF
+
+    # 生成 nginx 主配置文件
+    cat > "${NGINX_CONF_DIR}/nginx.conf" <<EOF
+user  root;
+worker_processes  auto;
+
+error_log  ${LOG_DIR}/nginx_error.log notice;
+pid        ${PID_DIR}/nginx.pid;
+
+events {
+    worker_connections  1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+
+    log_format  main  '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+                      '\$status \$body_bytes_sent "\$http_referer" '
+                      '"\$http_user_agent" "\$http_x_forwarded_for"';
+
+    access_log  ${LOG_DIR}/nginx_access.log  main;
+
+    sendfile        on;
+    keepalive_timeout  65;
+    client_max_body_size 1024M;
+
+    include ${NGINX_CONF_DIR}/ragflow.conf;
+}
+EOF
+
+    # 检查 nginx 配置文件语法
+    if ! nginx -t -c "${NGINX_CONF_DIR}/nginx.conf" > /dev/null 2>&1; then
+        echo "nginx 配置文件语法错误，请检查配置"
+        nginx -t -c "${NGINX_CONF_DIR}/nginx.conf"
+        return 1
+    fi
+
+    # 启动 nginx
+    echo "使用 nginx 启动（生产模式，支持 API 代理）..."
+    nginx -c "${NGINX_CONF_DIR}/nginx.conf" -g "pid ${PID_DIR}/nginx.pid;" > "${LOG_DIR}/web_frontend.log" 2>&1
+
+    # 获取 nginx 主进程 PID
+    if [ -f "${PID_DIR}/nginx.pid" ]; then
+        WEB_PID=$(cat "${PID_DIR}/nginx.pid")
+        echo $WEB_PID > "${pid_file}"
+        echo "Web 前端已启动（生产模式，nginx）(PID: ${WEB_PID}, PORT: ${WEB_PORT})"
+    else
+        echo "警告: 无法获取 nginx PID，请检查日志: ${LOG_DIR}/web_frontend.log"
+        return 1
+    fi
 }
 
 # 启动 Ragflow Server
@@ -281,24 +415,42 @@ force_stop_all() {
         echo "未找到 Task Executor 进程"
     fi
 
-    # 停止 Web 前端（serve 静态服务）
+    # 停止 Web 前端（nginx）
     echo ""
-    echo "查找并停止 Web 前端进程..."
-    WEB_PIDS=$(ps -ef | grep "serve -s dist" | grep -v grep | awk '{print $2}')
-    if [ -n "$WEB_PIDS" ]; then
-        for pid in $WEB_PIDS; do
-            echo "停止 Web Frontend (PID: $pid)..."
-            kill -9 $pid 2>/dev/null || true
-        done
-        echo "Web 前端进程已停止"
+    echo "查找并停止 Web 前端进程（nginx）..."
+    if [ -f "${PID_DIR}/nginx.pid" ]; then
+        NGINX_PID=$(cat "${PID_DIR}/nginx.pid")
+        if ps -p $NGINX_PID > /dev/null 2>&1; then
+            echo "停止 nginx (PID: $NGINX_PID)..."
+            nginx -s quit -c "${WORKSPACE_FOLDER}/nginx_conf/nginx.conf" 2>/dev/null || kill $NGINX_PID 2>/dev/null || true
+            sleep 1
+            if ps -p $NGINX_PID > /dev/null 2>&1; then
+                kill -9 $NGINX_PID 2>/dev/null || true
+            fi
+            rm -f "${PID_DIR}/nginx.pid"
+            echo "nginx 已停止"
+        else
+            echo "nginx 未运行"
+            rm -f "${PID_DIR}/nginx.pid"
+        fi
     else
-        echo "未找到 Web 前端进程"
+        # 查找所有 nginx 进程
+        NGINX_PIDS=$(ps -ef | grep "nginx.*ragflow.conf" | grep -v grep | awk '{print $2}')
+        if [ -n "$NGINX_PIDS" ]; then
+            for pid in $NGINX_PIDS; do
+                echo "停止 nginx (PID: $pid)..."
+                kill -9 $pid 2>/dev/null || true
+            done
+            echo "nginx 进程已停止"
+        else
+            echo "未找到 nginx 进程"
+        fi
     fi
     
     # 清理所有 PID 文件
     echo ""
     echo "清理 PID 文件..."
-    rm -f "${PID_DIR}"/ragflow_server.pid "${PID_DIR}"/worker_*.pid "${PID_DIR}"/web_frontend.pid
+    rm -f "${PID_DIR}"/ragflow_server.pid "${PID_DIR}"/worker_*.pid "${PID_DIR}"/web_frontend.pid "${PID_DIR}"/nginx.pid
     echo "完成"
 }
 
@@ -339,17 +491,24 @@ status() {
         echo "  没有运行的 Worker"
     fi
 
-    # Web Frontend
+    # Web Frontend (nginx)
     echo ""
     if [ -f "${PID_DIR}/web_frontend.pid" ]; then
         PID=$(cat "${PID_DIR}/web_frontend.pid")
         if is_process_running "$PID"; then
-            echo "Web 前端: 运行中 (PID: $PID, PORT: ${WEB_PORT})"
+            echo "Web 前端 (nginx): 运行中 (PID: $PID, PORT: ${WEB_PORT})"
         else
-            echo "Web 前端: 未运行"
+            echo "Web 前端 (nginx): 未运行"
+        fi
+    elif [ -f "${PID_DIR}/nginx.pid" ]; then
+        PID=$(cat "${PID_DIR}/nginx.pid")
+        if is_process_running "$PID"; then
+            echo "Web 前端 (nginx): 运行中 (PID: $PID, PORT: ${WEB_PORT})"
+        else
+            echo "Web 前端 (nginx): 未运行"
         fi
     else
-        echo "Web 前端: 未运行"
+        echo "Web 前端 (nginx): 未运行"
     fi
 }
 
