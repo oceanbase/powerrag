@@ -32,6 +32,7 @@ from quart import (
 )
 
 from peewee import OperationalError
+from werkzeug.exceptions import NotFound
 
 from common.constants import ActiveEnum
 from api.db.db_models import APIToken
@@ -77,7 +78,7 @@ def serialize_for_json(obj):
 
 
 def get_data_error_result(code=RetCode.DATA_ERROR, message="Sorry! Data missing!"):
-    logging.exception(Exception(message))
+    logging.exception(f"Data error: {message}")
     result_dict = {"code": code, "message": message}
     response = {}
     for key, value in result_dict.items():
@@ -89,7 +90,15 @@ def get_data_error_result(code=RetCode.DATA_ERROR, message="Sorry! Data missing!
 
 
 def server_error_response(e):
-    logging.exception(e)
+    # Handle 404 NotFound errors separately with lower log level
+    is_404 = isinstance(e, NotFound) or getattr(e, "code", None) == 404
+    if is_404:
+        logging.warning(f"404 Not Found: {getattr(e, 'description', str(e))}")
+        return get_json_result(code=RetCode.NOT_FOUND, message=str(e))
+    
+    # For other errors, log at exception level
+    logging.exception(f"Server error: {e}")
+    
     try:
         msg = repr(e).lower()
         if getattr(e, "code", None) == 401 or ("unauthorized" in msg) or ("401" in msg):
@@ -517,7 +526,7 @@ def verify_embedding_availability(embd_id: str, tenant_id: str) -> tuple[bool, R
         if not (is_builtin_model or is_tenant_model):
             return False, get_error_argument_result(f"Unauthorized model: <{embd_id}>")
     except OperationalError as e:
-        logging.exception(e)
+        logging.exception(f"Database operation failed: {e}")
         return False, get_error_data_result(message="Database operation failed")
 
     return True, None
