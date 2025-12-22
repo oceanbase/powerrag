@@ -18,12 +18,15 @@
 # from beartype.claw import beartype_all  # <-- you didn't sign up for this
 # beartype_all(conf=BeartypeConf(violation_type=UserWarning))    # <-- emit warnings from all code
 
+import os
+import logging
+
 from common.log_utils import init_root_logger
 from plugin import GlobalPluginManager
-init_root_logger("ragflow_server")
 
-import logging
-import os
+# Initialize logging as early as possible so show_configs() (INFO logs) won't be dropped.
+# deploy.sh sets RAGFLOW_LOG_BASENAME=ragflow_server_<port> for multi-instance runs.
+init_root_logger(os.environ.get("RAGFLOW_LOG_BASENAME", "ragflow_server"))
 import signal
 import sys
 import time
@@ -73,6 +76,10 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 if __name__ == '__main__':
+    show_configs()
+    settings.init_settings()
+    settings.print_rag_settings()
+
     logging.info(r"""
         ____   ___    ______ ______ __
        / __ \ /   |  / ____// ____// /____  _      __
@@ -87,9 +94,6 @@ if __name__ == '__main__':
     logging.info(
         f'project base: {get_project_base_directory()}'
     )
-    show_configs()
-    settings.init_settings()
-    settings.print_rag_settings()
 
     if RAGFLOW_DEBUGPY_LISTEN > 0:
         logging.info(f"debugpy listen on {RAGFLOW_DEBUGPY_LISTEN}")

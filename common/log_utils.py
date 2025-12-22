@@ -20,13 +20,14 @@ import logging
 from logging.handlers import RotatingFileHandler
 from common.file_utils import get_project_base_directory
 
-initialized_root_logger = False
+_initialized_loggers = set()
 
 def init_root_logger(logfile_basename: str, log_format: str = "%(asctime)-15s %(levelname)-8s %(process)d %(message)s"):
-    global initialized_root_logger
-    if initialized_root_logger:
+    global _initialized_loggers
+    # Allow re-initialization for different log file names (e.g., multi-instance servers)
+    if logfile_basename in _initialized_loggers:
         return
-    initialized_root_logger = True
+    _initialized_loggers.add(logfile_basename)
 
     logger = logging.getLogger()
     logger.handlers.clear()

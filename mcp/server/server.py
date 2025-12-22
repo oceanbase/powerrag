@@ -34,6 +34,11 @@ from strenum import StrEnum
 import mcp.types as types
 from mcp.server.lowlevel import Server
 
+try:
+    # In this repo, PYTHONPATH is set to project root so this import works.
+    from common.log_utils import init_root_logger
+except Exception:  # pragma: no cover
+    init_root_logger = None
 
 class LaunchMode(StrEnum):
     SELF_HOST = "self-host"
@@ -629,6 +634,11 @@ def main(base_url, host, port, mode, api_key, transport_sse_enabled, transport_s
     TRANSPORT_STREAMABLE_HTTP_ENABLED = parse_bool_flag("RAGFLOW_MCP_TRANSPORT_STREAMABLE_ENABLED", transport_streamable_http_enabled)
     JSON_RESPONSE = parse_bool_flag("RAGFLOW_MCP_JSON_RESPONSE", json_response)
 
+    # Initialize file logging (avoid relying on nohup stdout redirection).
+    # Use port in basename for multi-instance clarity.
+    if init_root_logger is not None:
+        init_root_logger(f"mcp_server_{PORT}")
+
     if MODE == LaunchMode.SELF_HOST and not HOST_API_KEY:
         raise click.UsageError("--api-key is required when --mode is 'self-host'")
 
@@ -638,42 +648,41 @@ def main(base_url, host, port, mode, api_key, transport_sse_enabled, transport_s
     if not TRANSPORT_STREAMABLE_HTTP_ENABLED and JSON_RESPONSE:
         JSON_RESPONSE = False
 
-    print(
+    logging.info(
         r"""
 __  __  ____ ____       ____  _____ ______     _______ ____
 |  \/  |/ ___|  _ \     / ___|| ____|  _ \ \   / / ____|  _ \
 | |\/| | |   | |_) |    \___ \|  _| | |_) \ \ / /|  _| | |_) |
 | |  | | |___|  __/      ___) | |___|  _ < \ V / | |___|  _ <
 |_|  |_|\____|_|        |____/|_____|_| \_\ \_/  |_____|_| \_\
-        """,
-        flush=True,
+        """
     )
-    print(f"MCP launch mode: {MODE}", flush=True)
-    print(f"MCP host: {HOST}", flush=True)
-    print(f"MCP port: {PORT}", flush=True)
-    print(f"MCP base_url: {BASE_URL}", flush=True)
+    logging.info("MCP launch mode: %s", MODE)
+    logging.info("MCP host: %s", HOST)
+    logging.info("MCP port: %s", PORT)
+    logging.info("MCP base_url: %s", BASE_URL)
 
     if not any([TRANSPORT_SSE_ENABLED, TRANSPORT_STREAMABLE_HTTP_ENABLED]):
-        print("At least one transport should be enabled, enable streamable-http automatically", flush=True)
+        logging.warning("At least one transport should be enabled, enable streamable-http automatically")
         TRANSPORT_STREAMABLE_HTTP_ENABLED = True
 
     if TRANSPORT_SSE_ENABLED:
-        print("SSE transport enabled: yes", flush=True)
-        print("SSE endpoint available at /sse", flush=True)
+        logging.info("SSE transport enabled: yes")
+        logging.info("SSE endpoint available at /sse")
     else:
-        print("SSE transport enabled: no", flush=True)
+        logging.info("SSE transport enabled: no")
 
     if TRANSPORT_STREAMABLE_HTTP_ENABLED:
-        print("Streamable HTTP transport enabled: yes", flush=True)
-        print("Streamable HTTP endpoint available at /mcp", flush=True)
+        logging.info("Streamable HTTP transport enabled: yes")
+        logging.info("Streamable HTTP endpoint available at /mcp")
         if JSON_RESPONSE:
-            print("Streamable HTTP mode: JSON response enabled", flush=True)
+            logging.info("Streamable HTTP mode: JSON response enabled")
         else:
-            print("Streamable HTTP mode: SSE over HTTP enabled", flush=True)
+            logging.info("Streamable HTTP mode: SSE over HTTP enabled")
     else:
-        print("Streamable HTTP transport enabled: no", flush=True)
+        logging.info("Streamable HTTP transport enabled: no")
         if JSON_RESPONSE:
-            print("Warning: --json-response ignored because streamable transport is disabled.", flush=True)
+            logging.warning("--json-response ignored because streamable transport is disabled.")
 
     uvicorn.run(
         create_starlette_app(),

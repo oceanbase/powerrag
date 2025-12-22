@@ -4,21 +4,64 @@
 
 ## 脚本说明
 
-### 1. `deploy.sh` - 运维部署脚本
+### 1. `deploy.sh` - 运维部署脚本（已按 `docker/entrypoint.sh` 重构）
 
-用于管理 RAGFlow Server 和 Worker 的启动、停止、重启等运维操作。
+现在 `deploy.sh` 采用 **entrypoint 风格的组件开关参数**，用 `start/stop/status` 作为动作，用 `--enable/--disable/--xxx=` 作为配置。
 
-**支持的命令：**
-- `start` - 启动所有服务（Server + Workers）
-- `stop` - 停止所有服务
-- `restart` - 重启所有服务
-- `force-stop` - 强制停止所有相关进程（不依赖 PID 文件）
-- `force-restart` - 强制重启所有服务
-- `status` - 查看服务状态
-- `start-ragflow-server` - 仅启动 Ragflow Server
-- `stop-ragflow-server` - 仅停止 Ragflow Server
-- `start-web` - 启动 Web 前端（正式环境：build + 静态服务）
-- `stop-web` - 停止 Web 前端
+**支持的动作：**
+- `start` - 启动组件（默认启动 `webserver + taskexecutor`；datasync 默认不启动）
+- `stop` - 停止本脚本启动的组件（基于 `pids/`）
+- `restart` - stop + start
+- `status` - 查看状态
+- `force-stop` - 强制停止相关进程（不依赖 PID 文件，谨慎使用）
+- `help` - 查看帮助
+
+**主要组件开关（对齐 `docker/entrypoint.sh`）：**
+- `--enable-webserver` - 启动 WebServer（`ragflow_server` + 可选 nginx 前端）
+- `--disable-webserver` - 不启动 WebServer（`ragflow_server` + 可选 nginx 前端）
+- `--enable-taskexecutor` - 启动 task executor
+- `--disable-taskexecutor` - 不启动 task executor
+- `--enable-datasync` - 启动 datasource sync（默认不启动）
+- `--disable-datasync` - 不启动 datasource sync
+- `--enable-mcpserver` - 启动 MCP Server
+- `--enable-adminserver` - 启动 Admin Server
+- `--enable-powerragserver` - 启动 PowerRAG Server
+
+> 规则：如果 `start` 时带了任意 `--enable-*` 参数，则进入 **enable-only 模式**：只启动被 enable 的组件，其它组件都不会启动。  
+> 不带任何 `--enable-*` 时，走默认模式：启动 `webserver + taskexecutor`。
+
+**多 ragflow_server 支持（对齐 `docker/entrypoint.sh`）：**
+- `--svr-count=<num>`：实例数（默认 1）
+- `--svr-http-port=<num>`：实例 0 端口（默认 9380）
+- `--svr-extra-base-http-port=<num>`：实例 1..N 端口基数（默认 9400，即 9400、9401...）
+
+  **注意**：ragflow_server 端口不能与 admin-svr-http-port、mcp-port、powerrag-port、web-port 冲突。脚本会在启动前检查端口冲突并报错。
+- `--admin-svr-http-port=<num>`：写入生成的配置 `admin.http_port`（默认 9381）
+- `--service-conf=<filename>`：基础配置文件（默认 `conf/service_conf.yaml`）
+
+> 说明：脚本会在 `conf/` 下生成 `service_conf_ragflow_<idx>.yaml`，并通过环境变量 `RAGFLOW_SERVICE_CONF` 启动对应实例。
+
+**Task Executor（消费者）配置：**
+- `--consumer-no-beg=<num>`
+- `--consumer-no-end=<num>`：半开区间 `[beg, end)`
+- `--workers=<num>`：如果未指定 range，则启动固定数量 worker（默认 1）
+- `--host-id=<string>`：默认 `hostname`（长度 > 32 则 md5）
+
+**MCP 配置：**
+- `--mcp-host=<ip>`
+- `--mcp-port=<num>`
+- `--mcp-base-url=<url>`
+- `--mcp-mode=<self-host|hosted>`
+- `--mcp-host-api-key=<string>`
+- `--no-transport-sse-enabled`
+- `--no-transport-streamable-http-enabled`
+- `--no-json-response`
+
+**PowerRAG 配置：**
+- `--powerrag-port=<num>`（默认 6000）
+
+**兼容性：**
+- 不再提供单独的 `start-web/stop-web` 命令；前端 nginx（静态 + 反代 API）随 `webserver` 一起启动。
 
 ### 2. `tools.sh` - 工具脚本
 
@@ -33,42 +76,72 @@
 
 ## 快速开始
 
-### 运维部署
+### 运维部署（deploy.sh）
 
 ```bash
-# 从项目根目录运行
-# 启动所有服务（默认 2 个 Workers）
+# 启动默认组件：webserver + taskexecutor（datasync 默认不启动）
 ./scripts/deploy.sh start
 
-# 启动指定数量的 Workers
-WORKER_COUNT=64 ./scripts/deploy.sh start
-
-# 停止所有服务
-./scripts/deploy.sh stop
-
-# 重启所有服务
-./scripts/deploy.sh restart
-
-# 查看服务状态
+# 查看状态
 ./scripts/deploy.sh status
 
-# 仅启动/停止 Ragflow Server
-./scripts/deploy.sh start-ragflow-server
-./scripts/deploy.sh stop-ragflow-server
+# 停止
+./scripts/deploy.sh stop
 
-# 启动/停止 Web 前端（正式环境）
-WEB_PORT=9222 SERVER_PORT_FOR_WEB=9380 ./scripts/deploy.sh start-web
-./scripts/deploy.sh stop-web
+# 强制停止（不依赖 pid 文件，谨慎使用）
+./scripts/deploy.sh force-stop
+
+# 清理运行时生成文件（会先 stop，再删除 logs/、pids/、nginx_conf/、conf/service_conf_ragflow_*.yaml）
+./scripts/deploy.sh clear
 ```
 
-或者从 scripts 目录运行：
+#### 启动多个 ragflow_server 和 多个 task executors
+```bash
+./scripts/deploy.sh start \
+  --svr-count=2 \
+  --svr-http-port=9380 \
+  --svr-extra-base-http-port=9400 \
+  --workers=2
+```
+
+#### 仅启动 ragflow_server（不启动 worker/datasync）
 
 ```bash
-cd scripts
-./deploy.sh start
+./scripts/deploy.sh start --enable-webserver
 ```
 
-### 工具脚本
+#### 启动多个 ragflow_server 实例（多端口）
+
+```bash
+./scripts/deploy.sh start \
+  --enable-webserver
+  --svr-count=3 \
+  --svr-http-port=9380 \
+  --svr-extra-base-http-port=9400 
+```
+
+#### 启动 task executors（固定数量）
+
+```bash
+./scripts/deploy.sh start --enable-taskexecutor --workers=2
+```
+
+#### 启动 task executors（range 模式）
+
+```bash
+./scripts/deploy.sh start --enable-taskexecutor\
+  --consumer-no-beg=0 --consumer-no-end=5 \
+  --host-id=myhost123
+```
+
+#### 启动 MCP / Admin / PowerRAG
+
+```bash
+./scripts/deploy.sh start --enable-mcpserver --enable-adminserver --enable-powerragserver
+./scripts/deploy.sh start --enable-powerragserver --powerrag-port=6000
+```
+
+### 工具脚本（tools.sh）
 
 ```bash
 # 上传 Wiki JSON 数据
@@ -91,89 +164,59 @@ API_KEY=xxx HOST=xxx DATASET_ID=xxx BATCH_SIZE=1000 ./scripts/tools.sh reparse-f
 ./scripts/tools.sh status
 ```
 
-## 环境变量配置
+## 日志与 PID
 
-### 运维部署相关
+### 服务日志（默认在 `logs/`）
 
-- `WORKER_COUNT` - Worker 数量（默认: 2）
-- `SERVER_PORT_FOR_WEB` - Ragflow Server 端口（默认: 9380）
-- `WEB_PORT` - Web 前端端口（默认: 9222）
+**注意**：服务日志由各服务通过 `init_root_logger()` 自行管理，脚本不再重复记录日志。
 
-### Wiki 上传相关
+- `logs/ragflow_server_{port}.log` - RAGFlow 服务日志（按端口号区分，例如：`logs/ragflow_server_9380.log`）
+- `logs/task_executor_{id}.log` - Task executor 日志（例如：`logs/task_executor_0.log`）
+- `logs/data_sync_{consumer_no}.log` - Data sync 日志
+- `logs/admin_service.log` - Admin 服务日志
+- `logs/powerrag_server.log` - PowerRAG 服务日志
+- `logs/nginx_access.log` - Nginx 访问日志
+- `logs/nginx_error.log` - Nginx 错误日志
+- `logs/web_frontend.log` - Nginx 启动日志（仅启动时的输出）
 
-- `API_KEY` - API Key
-- `HOST` - 服务器地址（默认: http://127.0.0.1:9380）
-- `WIKI_DATA_DIR` - 数据目录
-- `DATASET_ID` - 数据集 ID（可选）
-- `BATCH_SIZE` - 批量大小（默认: 1000）
-- `WIKI_SNAPSHOT_FILE` - 快照文件路径（默认: `${LOG_DIR}/upload_snapshot.json`）
-- `WIKI_ENABLE_RESUME` - 是否启用断点续传（默认: true）
+### PID 文件（默认在 `pids/`）
 
-### 重新解析失败文档相关
-
-- `API_KEY` - API Key
-- `HOST` - 服务器地址（默认: http://127.0.0.1:9380）
-- `DATASET_ID` - 数据集 ID（必需）
-- `BATCH_SIZE` - 批量大小（默认: 50）
-
-## 日志文件
-
-### 服务日志
-
-- Ragflow Server: `logs/ragflow_server.log`
-- Worker N: `logs/worker_N.log`
-- Web Frontend: `logs/web_frontend.log`
-
-### 工具任务日志
-
-- Wiki JSON 上传: `logs/upload_wiki_json.log`
-- 重新解析失败文档: `logs/reparse_failed_docs.log`
+- `pids/ragflow_server_<port>.pid`
+- `pids/task_executor_<id>.pid`
+- `pids/datasync.pid`
+- `pids/admin_server.pid`
+- `pids/mcp_server.pid`
+- `pids/powerrag_server.pid`
+- `pids/web_frontend.pid`
 
 ## 查看日志
 
 ```bash
-# 实时查看 Ragflow Server 日志
-tail -f logs/ragflow_server.log
+# RAGFlow 服务（根据端口号）
+tail -f logs/ragflow_server_9380.log
+tail -f logs/ragflow_server_9400.log  # 如果有多个实例
 
-# 实时查看 Worker 0 日志
-tail -f logs/worker_0.log
+# Task executor（根据实际的 host_id 和 consumer_id）
+# Task executor（worker id）
+tail -f logs/task_executor_0.log
 
-# 实时查看 Wiki 上传日志
-tail -f logs/upload_wiki_json.log
+# Data sync
+tail -f logs/data_sync_0.log
 
-# 实时查看重新解析日志
-tail -f logs/reparse_failed_docs.log
+# Admin 服务
+tail -f logs/admin_service.log
+
+# PowerRAG 服务
+tail -f logs/powerrag_server.log
+
+# Nginx 日志
+tail -f logs/nginx_access.log
+tail -f logs/nginx_error.log
 ```
-
-## 停止服务
-
-```bash
-# 使用脚本停止（推荐）
-./scripts/deploy.sh stop
-
-# 强制停止（不依赖 PID 文件）
-./scripts/deploy.sh force-stop
-
-# 手动查找并停止进程
-ps aux | grep ragflow_server.py
-ps aux | grep task_executor.py
-kill <PID>
-```
-
-## PID 文件
-
-所有脚本使用 PID 文件来跟踪进程状态，PID 文件存储在 `pids/` 目录下：
-
-- `pids/ragflow_server.pid` - Ragflow Server 进程 ID
-- `pids/worker_N.pid` - Worker N 进程 ID
-- `pids/web_frontend.pid` - Web 前端进程 ID
-- `pids/upload_wiki_json.pid` - Wiki 上传任务进程 ID
-- `pids/reparse_failed_docs.pid` - 重新解析任务进程 ID
 
 ## 注意事项
 
-1. 所有脚本都需要从项目根目录运行，或确保 `WORKSPACE_FOLDER` 环境变量正确设置
-2. 使用 `force-stop` 或 `force-restart` 会强制终止所有相关进程，请谨慎使用
-3. Wiki 上传任务支持断点续传，默认启用。快照文件保存在 `${LOG_DIR}/upload_snapshot.json`
-4. 重新解析失败文档任务需要设置 `DATASET_ID` 环境变量
-5. 所有日志文件都保存在 `logs/` 目录下
+1. 推荐从项目根目录运行：`./scripts/deploy.sh ...`
+2. `force-stop` 会强制 kill 相关进程，请谨慎使用
+3. 多实例 `ragflow_server` 通过 `RAGFLOW_SERVICE_CONF` 启动，不再需要替换 `local.service_conf.yaml`
+4. **端口配置**：设置 ragflow_server 端口时，需要预留 admin-svr-http-port（默认 9381）、mcp-port（默认 9382）等端口，避免冲突。脚本会在启动前检查并报错。
