@@ -654,7 +654,7 @@ class DocumentService(CommonService):
         docs = cls.model.select(cls.model.id).join(Knowledgebase,
                                                    on=(Knowledgebase.id == cls.model.kb_id)).where(
             Knowledgebase.tenant_id == tenant_id)
-        return len(docs)
+        return docs.count()
 
     @classmethod
     @DB.connection_context()
