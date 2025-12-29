@@ -65,6 +65,10 @@ def reparse_failed_documents(rag: RAGFlow, dataset_id: str, batch_size: int = 50
         dataset_id: Dataset ID to reparse documents from
         batch_size: Batch size for reparsing documents (default: 50)
     """
+    # Validate batch_size
+    if batch_size <= 0:
+        raise ValueError(f"batch_size must be greater than 0, got {batch_size}")
+    
     # Get dataset
     datasets = rag.list_datasets(id=dataset_id)
     if not datasets:
@@ -84,6 +88,12 @@ def reparse_failed_documents(rag: RAGFlow, dataset_id: str, batch_size: int = 50
     def reparse_batch(doc_ids):
         """Reparse a batch of documents."""
         nonlocal total_reparsed
+        # This check should not be needed if the calling code is correct,
+        # but kept as a safety measure
+        if not doc_ids:
+            logging.warning("  ⚠️  Skipping empty batch (this should not happen)")
+            return
+        
         logging.info(f"  Reparsing batch of {len(doc_ids)} documents...")
         try:
             ds.async_parse_documents(doc_ids)
@@ -133,7 +143,7 @@ def reparse_failed_documents(rag: RAGFlow, dataset_id: str, batch_size: int = 50
         while len(pending_failed_doc_ids) >= batch_size:
             batch_number += 1
             batch = pending_failed_doc_ids[:batch_size]
-            pending_failed_doc_ids = []
+            pending_failed_doc_ids = pending_failed_doc_ids[batch_size:]  # Remove only the processed batch
             logging.info(f"\nProcessing batch {batch_number} ({len(batch)} documents)...")
             reparse_batch_with_retry(batch)
         
