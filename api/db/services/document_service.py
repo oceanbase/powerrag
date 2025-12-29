@@ -807,11 +807,11 @@ class DocumentService(CommonService):
                 # only for special task and parsed docs and unfinished
                 freeze_progress = special_task_running and doc_progress >= 1 and not finished
                 msg = "\n".join(sorted(msg))
-                info = {
-                    "process_duration": datetime.timestamp(
-                        datetime.now()) -
-                                       d["process_begin_at"].timestamp(),
-                    "run": status}
+                info = {"run": status}
+                # Calculate processing duration, prefer using doc.process_begin_at; if it is None, skip the update
+                process_begin_at = doc.process_begin_at if doc and doc.process_begin_at else d.get("process_begin_at")
+                if process_begin_at is not None:
+                    info["process_duration"] = datetime.timestamp(datetime.now()) - process_begin_at.timestamp()
                 if prg != 0 and not freeze_progress:
                     info["progress"] = prg
                 if msg:
