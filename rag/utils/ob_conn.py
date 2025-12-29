@@ -451,6 +451,8 @@ class OBConnection(DocStoreConnection):
             raise Exception(
                 f"The version of OceanBase needs to be higher than or equal to 4.3.5.1, current version is {version_str}"
             )
+    
+        self.is_less_than_441 = ob_version < ObVersion.from_db_version_nums(4, 4, 1, 0)
 
     def _try_to_update_ob_query_timeout(self):
         try:
@@ -957,8 +959,12 @@ class OBConnection(DocStoreConnection):
 
             if not self._check_table_exists_cached(index_name):
                 continue
-
-            fulltext_search_hint = f"/*+ UNION_MERGE({index_name} {' '.join(fulltext_search_idx_list)}) */" if self.use_fulltext_hint else ""
+            # https://www.oceanbase.com/docs/common-oceanbase-database-cn-1000000004480377#13-title-INDEX_MERGE%20Hint
+            # UNION_MERGE hint is removed in 4.4.1, use INDEX_MERGE hint instead
+            if self.is_less_than_441:
+                fulltext_search_hint = f"/*+ UNION_MERGE({index_name} {' '.join(fulltext_search_idx_list)}) */" if self.use_fulltext_hint else ""
+            else:
+                fulltext_search_hint = f"/*+ INDEX_MERGE({index_name} {' '.join(fulltext_search_idx_list)}) */" if self.use_fulltext_hint else ""
 
             if search_type == "fusion":
                 # fusion search, usually for chat
