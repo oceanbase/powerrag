@@ -406,7 +406,8 @@ def chat(dialog, messages, stream=True, **kwargs):
 
     if dialog.meta_data_filter:
         metas = DocumentService.get_meta_by_kbs(dialog.kb_ids)
-        attachments = apply_metadata_filter(metas, dialog.meta_data_filter, questions[-1], chat_mdl, attachments, dialog.kb_ids)
+        if dialog.meta_data_filter.get("method") != "disabled":
+            attachments = apply_metadata_filter(metas, dialog.meta_data_filter, questions[-1], chat_mdl, attachments, dialog.kb_ids)
 
     if prompt_config.get("keyword", False):
         questions[-1] += keyword_extraction(chat_mdl, questions[-1])
@@ -769,7 +770,8 @@ def ask(question, kb_ids, tenant_id, chat_llm_name=None, search_config={}):
 
     if meta_data_filter:
         metas = DocumentService.get_meta_by_kbs(kb_ids)
-        doc_ids = apply_metadata_filter(metas, meta_data_filter, question, chat_mdl, doc_ids, kb_ids)
+        if meta_data_filter.get("method") != "disabled":
+            doc_ids = apply_metadata_filter(metas, meta_data_filter, question, chat_mdl, doc_ids, kb_ids)
 
     kbinfos = retriever.retrieval(
         question=question,
@@ -836,7 +838,8 @@ def gen_mindmap(question, kb_ids, tenant_id, search_config={}):
 
     if meta_data_filter:
         metas = DocumentService.get_meta_by_kbs(kb_ids)
-        doc_ids = apply_metadata_filter(metas, meta_data_filter, question, chat_mdl, doc_ids, kb_ids)
+        if meta_data_filter.get("method") != "disabled":
+            doc_ids = apply_metadata_filter(metas, meta_data_filter, question, chat_mdl, doc_ids, kb_ids)
 
     ranks = settings.retriever.retrieval(
         question=question,
