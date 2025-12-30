@@ -54,14 +54,28 @@ class DataSet(Base):
         url = f"/datasets/{self.id}/documents"
         files = [("file", (ele["display_name"], ele["blob"])) for ele in document_list]
         res = self.post(path=url, json=None, files=files)
-        res = res.json()
-        if res.get("code") == 0:
+        
+        # Check response status code
+        if res.status_code != 200:
+            raise Exception(f"API request failed with status code {res.status_code}: {res.text[:500]}")
+        
+        # Check if response body is empty
+        if not res.text or not res.text.strip():
+            raise Exception(f"API returned empty response (status {res.status_code}). URL: {res.url}")
+        
+        # Try to parse JSON
+        try:
+            res_json = res.json()
+        except Exception as e:
+            raise Exception(f"Failed to parse JSON response (status {res.status_code}): {str(e)}. Response text: {res.text[:500]}")
+        
+        if res_json.get("code") == 0:
             doc_list = []
-            for doc in res["data"]:
+            for doc in res_json.get("data", []):
                 document = Document(self.rag, doc)
                 doc_list.append(document)
             return doc_list
-        raise Exception(res.get("message"))
+        raise Exception(res_json.get("message", "Unknown error"))
     
     def upload_documents_with_meta(self, document_list: list[dict], group_id_field: str = None, file_extension: str = "html"):
         url = f"/datasets/{self.id}/documents_with_meta"
@@ -73,14 +87,28 @@ class DataSet(Base):
                 "metadata": ele.get("metadata", {}),
             })
         res = self.post(path=url, json={"docs": docs, "group_id_field": group_id_field, "file_extension": file_extension})
-        res = res.json()
-        if res.get("code") == 0:
+        
+        # Check response status code
+        if res.status_code != 200:
+            raise Exception(f"API request failed with status code {res.status_code}: {res.text[:500]}")
+        
+        # Check if response body is empty
+        if not res.text or not res.text.strip():
+            raise Exception(f"API returned empty response (status {res.status_code}). URL: {res.url}")
+        
+        # Try to parse JSON
+        try:
+            res_json = res.json()
+        except Exception as e:
+            raise Exception(f"Failed to parse JSON response (status {res.status_code}): {str(e)}. Response text: {res.text[:500]}")
+        
+        if res_json.get("code") == 0:
             doc_list = []
-            for doc in res["data"]:
+            for doc in res_json.get("data", []):
                 document = Document(self.rag, doc)
                 doc_list.append(document)
             return doc_list
-        raise Exception(res.get("message"))
+        raise Exception(res_json.get("message", "Unknown error"))
 
     def list_documents(
         self,

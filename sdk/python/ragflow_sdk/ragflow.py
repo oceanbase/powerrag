@@ -48,6 +48,36 @@ class RAGFlow:
         res = requests.put(url=self.api_url + path, json=json, headers=self.authorization_header)
         return res
 
+    def _parse_response(self, res, url=None):
+        """
+        Parse API response with proper error handling.
+        
+        Args:
+            res: requests.Response object
+            url: Optional URL for error messages
+            
+        Returns:
+            Parsed JSON response as dict
+            
+        Raises:
+            Exception: If response is invalid or contains error
+        """
+        # Check response status code
+        if res.status_code != 200:
+            raise Exception(f"API request failed with status code {res.status_code}: {res.text[:500]}")
+        
+        # Check if response body is empty
+        if not res.text or not res.text.strip():
+            error_url = url or res.url if hasattr(res, 'url') else 'unknown'
+            raise Exception(f"API returned empty response (status {res.status_code}). URL: {error_url}")
+        
+        # Try to parse JSON
+        try:
+            return res.json()
+        except Exception as e:
+            error_url = url or res.url if hasattr(res, 'url') else 'unknown'
+            raise Exception(f"Failed to parse JSON response (status {res.status_code}): {str(e)}. Response text: {res.text[:500]}")
+
     def create_dataset(
         self,
         name: str,
@@ -70,10 +100,10 @@ class RAGFlow:
             payload["parser_config"] = parser_config.to_json()
 
         res = self.post("/datasets", payload)
-        res = res.json()
-        if res.get("code") == 0:
-            return DataSet(self, res["data"])
-        raise Exception(res["message"])
+        res_json = self._parse_response(res)
+        if res_json.get("code") == 0:
+            return DataSet(self, res_json["data"])
+        raise Exception(res_json.get("message", "Unknown error"))
 
     def delete_datasets(self, ids: list[str] | None = None):
         res = self.delete("/datasets", {"ids": ids})
@@ -99,13 +129,13 @@ class RAGFlow:
                 "name": name,
             },
         )
-        res = res.json()
+        res_json = self._parse_response(res)
         result_list = []
-        if res.get("code") == 0:
-            for data in res["data"]:
+        if res_json.get("code") == 0:
+            for data in res_json.get("data", []):
                 result_list.append(DataSet(self, data))
             return result_list
-        raise Exception(res["message"])
+        raise Exception(res_json.get("message", "Unknown error"))
 
     def create_chat(self, name: str, avatar: str = "", dataset_ids=None, llm: Chat.LLM | None = None, prompt: Chat.Prompt | None = None) -> Chat:
         if dataset_ids is None:

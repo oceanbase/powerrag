@@ -14,32 +14,24 @@
 #  limitations under the License.
 #
 
-from beartype.claw import beartype_this_package
-beartype_this_package()
-
-import importlib.metadata
-
-from .ragflow import RAGFlow
-from .modules.dataset import DataSet
-from .modules.chat import Chat
-from .modules.session import Session
-from .modules.document import Document
-from .modules.chunk import Chunk
-from .modules.agent import Agent
-from .tools import BatchUploader, DocumentExtractor, FileReader, FieldMapper
-
-__version__ = importlib.metadata.version("ragflow_sdk")
+from .batch_uploader import BatchUploader
+from .document_extractor import DocumentExtractor
+from .file_reader import FileReader
+from .field_mapper import FieldMapper
+from .models import FileType, DocumentFormat, Document, DocumentMetadata, FieldMappingConfig, FileCursor, Snapshot, BatchInfo
 
 __all__ = [
-    "RAGFlow",
-    "DataSet",
-    "Chat",
-    "Session",
-    "Document",
-    "Chunk",
-    "Agent",
     "BatchUploader",
     "DocumentExtractor",
     "FileReader",
     "FieldMapper",
+    "FileType",
+    "DocumentFormat",
+    "Document",
+    "DocumentMetadata",
+    "FieldMappingConfig",
+    "FileCursor",
+    "Snapshot",
+    "BatchInfo",
 ]
+

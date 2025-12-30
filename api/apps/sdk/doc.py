@@ -204,7 +204,12 @@ async def upload_with_meta(dataset_id, tenant_id):
     for doc in docs:
         title = doc["title"]
         file_obj = io.BytesIO(doc["content"].encode("utf-8"))
-        file_obj.filename = f"{title}.{file_extension}"
+        # If the title already has an extension, do not add another extension
+        if "." in title:
+            filename = title
+        else:
+            filename = f"{title}.{file_extension}"
+        file_obj.filename = filename
         metadata = doc.get("metadata", {})
         if not metadata.get("_group_id") and group_id_field and group_id_field in metadata:
             metadata["_group_id"] = metadata[group_id_field]

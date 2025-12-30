@@ -213,3 +213,4 @@ upload_wiki_json.pid
 .ragflow_secret_key
 setup_tools_venv.sh
 build_tools_bundle.sh
+upload_snapshot.json
