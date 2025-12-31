@@ -483,6 +483,8 @@ class OBConnection(DocStoreConnection):
         self.use_fulltext_hint = is_true('USE_FULLTEXT_HINT', 'true')
         self.search_original_content = is_true("SEARCH_ORIGINAL_CONTENT", 'true')
         self.enable_hybrid_search = is_true('ENABLE_HYBRID_SEARCH', 'false')
+        self.use_fulltext_first_fusion_search = is_true('USE_FULLTEXT_FIRST_FUSION_SEARCH', 'true')
+        logger.info(f"USE_FULLTEXT_FIRST_FUSION_SEARCH={self.use_fulltext_first_fusion_search}")
 
     """
     Database operations
@@ -969,39 +971,113 @@ class OBConnection(DocStoreConnection):
             if search_type == "fusion":
                 # fusion search, usually for chat
                 num_candidates = vector_topn + fulltext_topn
-                if group_results:
-                    count_sql = (
-                        f"WITH fulltext_results AS ("
-                        f"  SELECT {fulltext_search_hint} *, {fulltext_search_score_expr} AS relevance"
-                        f"      FROM {index_name}"
-                        f"      WHERE {filters_expr} AND {fulltext_search_filter}"
-                        f"      ORDER BY relevance DESC"
-                        f"      LIMIT {num_candidates}"
-                        f"),"
-                        f" scored_results AS ("
-                        f"  SELECT *"
-                        f"      FROM fulltext_results"
-                        f"      WHERE {vector_search_filter}"
-                        f"),"
-                        f" group_results AS ("
-                        f"  SELECT *, ROW_NUMBER() OVER (PARTITION BY group_id) as rn"
-                        f"      FROM scored_results"
-                        f")"
-                        f"  SELECT COUNT(*)"
-                        f"      FROM group_results"
-                        f"      WHERE rn = 1"
-                    )
+                if self.use_fulltext_first_fusion_search:
+                    # fulltext-first fusion: take top-N fulltext results, then apply vector similarity threshold filter
+                    if group_results:
+                        count_sql = (
+                            f"WITH fulltext_results AS ("
+                            f"  SELECT {fulltext_search_hint} *, {fulltext_search_score_expr} AS relevance"
+                            f"      FROM {index_name}"
+                            f"      WHERE {filters_expr} AND {fulltext_search_filter}"
+                            f"      ORDER BY relevance DESC"
+                            f"      LIMIT {num_candidates}"
+                            f"),"
+                            f" scored_results AS ("
+                            f"  SELECT *"
+                            f"      FROM fulltext_results"
+                            f"      WHERE {vector_search_filter}"
+                            f"),"
+                            f" group_results AS ("
+                            f"  SELECT *, ROW_NUMBER() OVER (PARTITION BY group_id) as rn"
+                            f"      FROM scored_results"
+                            f")"
+                            f"  SELECT COUNT(*)"
+                            f"      FROM group_results"
+                            f"      WHERE rn = 1"
+                        )
+                    else:
+                        count_sql = (
+                            f"WITH fulltext_results AS ("
+                            f"  SELECT {fulltext_search_hint} *, {fulltext_search_score_expr} AS relevance"
+                            f"      FROM {index_name}"
+                            f"      WHERE {filters_expr} AND {fulltext_search_filter}"
+                            f"      ORDER BY relevance DESC"
+                            f"      LIMIT {num_candidates}"
+                            f")"
+                            f"  SELECT COUNT(*) FROM fulltext_results WHERE {vector_search_filter}"
+                        )
                 else:
-                    count_sql = (
-                        f"WITH fulltext_results AS ("
-                        f"  SELECT {fulltext_search_hint} *, {fulltext_search_score_expr} AS relevance"
-                        f"      FROM {index_name}"
-                        f"      WHERE {filters_expr} AND {fulltext_search_filter}"
-                        f"      ORDER BY relevance DESC"
-                        f"      LIMIT {num_candidates}"
-                        f")"
-                        f"  SELECT COUNT(*) FROM fulltext_results WHERE {vector_search_filter}"
-                    )
+                    # join-based fusion: fetch top-K fulltext and top-K vector results independently, then FULL OUTER JOIN by id
+                    # NOTE: We use COALESCE for pagerank so vector-only results can also get pagerank.
+                    if group_results:
+                        count_sql = (
+                            f"WITH fulltext_results AS ("
+                            f"  SELECT {fulltext_search_hint} id, {PAGERANK_FLD}, {fulltext_search_score_expr} AS relevance"
+                            f"      FROM {index_name}"
+                            f"      WHERE {filters_expr} AND {fulltext_search_filter}"
+                            f"      ORDER BY relevance DESC"
+                            f"      LIMIT {fulltext_topn}"
+                            f"),"
+                            f"vector_results AS ("
+                            f"  SELECT id, {PAGERANK_FLD}, {vector_search_score_expr} AS similarity"
+                            f"      FROM {index_name}"
+                            f"      WHERE {filters_expr} AND {vector_search_filter}"
+                            f"      ORDER BY {vector_search_expr}"
+                            f"      APPROXIMATE LIMIT {vector_topn}"
+                            f"),"
+                            f"combined_results AS ("
+                            f"  SELECT"
+                            f"      COALESCE(f.id, v.id) AS id,"
+                            f"      ("
+                            # Normalize fulltext relevance within candidate set to make fusion weights meaningful,
+                            # and protect vector-only/fulltext-only rows from NULL-propagation.
+                            f"        IFNULL(f.relevance / NULLIF((SELECT MAX(relevance) FROM fulltext_results), 0), 0) * {1 - vector_similarity_weight}"
+                            f"        + IFNULL(v.similarity, 0) * {vector_similarity_weight}"
+                            f"        + (CAST(IFNULL(COALESCE(f.{PAGERANK_FLD}, v.{PAGERANK_FLD}), 0) AS DECIMAL(10, 2)) / 100)"
+                            f"      ) AS score"
+                            f"      FROM fulltext_results f"
+                            f"      FULL OUTER JOIN vector_results v"
+                            f"      ON f.id = v.id"
+                            f"),"
+                            f"joined_results AS ("
+                            f"  SELECT t.*, c.score AS _score"
+                            f"      FROM combined_results c"
+                            f"      JOIN {index_name} t"
+                            f"      ON c.id = t.id"
+                            f"),"
+                            f"group_results AS ("
+                            f"  SELECT *, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY _score DESC) as rn"
+                            f"      FROM joined_results"
+                            f")"
+                            f"  SELECT COUNT(*)"
+                            f"      FROM group_results"
+                            f"      WHERE rn = 1"
+                        )
+                    else:
+                        count_sql = (
+                            f"WITH fulltext_results AS ("
+                            f"  SELECT {fulltext_search_hint} id, {PAGERANK_FLD}, {fulltext_search_score_expr} AS relevance"
+                            f"      FROM {index_name}"
+                            f"      WHERE {filters_expr} AND {fulltext_search_filter}"
+                            f"      ORDER BY relevance DESC"
+                            f"      LIMIT {fulltext_topn}"
+                            f"),"
+                            f"vector_results AS ("
+                            f"  SELECT id, {PAGERANK_FLD}, {vector_search_score_expr} AS similarity"
+                            f"      FROM {index_name}"
+                            f"      WHERE {filters_expr} AND {vector_search_filter}"
+                            f"      ORDER BY {vector_search_expr}"
+                            f"      APPROXIMATE LIMIT {vector_topn}"
+                            f"),"
+                            f"combined_results AS ("
+                            f"  SELECT"
+                            f"      COALESCE(f.id, v.id) AS id"
+                            f"      FROM fulltext_results f"
+                            f"      FULL OUTER JOIN vector_results v"
+                            f"      ON f.id = v.id"
+                            f")"
+                            f"  SELECT COUNT(*) FROM combined_results"
+                        )
                 logger.debug("OBConnection.search with count sql: %s", count_sql)
 
                 start_time = time.time()
@@ -1023,46 +1099,126 @@ class OBConnection(DocStoreConnection):
                 if total_count == 0:
                     continue
 
-                score_expr = f"(relevance * {1 - vector_similarity_weight} + {vector_search_score_expr} * {vector_similarity_weight} + {pagerank_score_expr})"
-                if group_results:
-                    fusion_sql = (
-                        f"WITH fulltext_results AS ("
-                        f"  SELECT {fulltext_search_hint} *, {fulltext_search_score_expr} AS relevance"
-                        f"      FROM {index_name}"
-                        f"      WHERE {filters_expr} AND {fulltext_search_filter}"
-                        f"      ORDER BY relevance DESC"
-                        f"      LIMIT {num_candidates}"
-                        f"),"
-                        f" scored_results AS ("
-                        f"  SELECT *, {score_expr} AS _score"
-                        f"      FROM fulltext_results"
-                        f"      WHERE {vector_search_filter}"
-                        f"),"
-                        f" group_results AS ("
-                        f"  SELECT *, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY _score DESC) as rn"
-                        f"      FROM scored_results"
-                        f")"
-                        f"  SELECT {fields_expr}, _score"
-                        f"      FROM group_results"
-                        f"      WHERE rn = 1"
-                        f"      ORDER BY _score DESC"
-                        f"      LIMIT {offset}, {limit}"
-                    )
+                if self.use_fulltext_first_fusion_search:
+                    # NOTE:
+                    # MATCH ... AGAINST relevance is not bounded and can dwarf vector similarity (typically in [-1, 1]).
+                    # Normalize relevance within the candidate set (fulltext_results) so weights behave as intended.
+                    relevance_norm_expr = "IFNULL(relevance / NULLIF((SELECT MAX(relevance) FROM fulltext_results), 0), 0)"
+                    score_expr = f"({relevance_norm_expr} * {1 - vector_similarity_weight} + {vector_search_score_expr} * {vector_similarity_weight} + {pagerank_score_expr})"
+                    if group_results:
+                        fusion_sql = (
+                            f"WITH fulltext_results AS ("
+                            f"  SELECT {fulltext_search_hint} *, {fulltext_search_score_expr} AS relevance"
+                            f"      FROM {index_name}"
+                            f"      WHERE {filters_expr} AND {fulltext_search_filter}"
+                            f"      ORDER BY relevance DESC"
+                            f"      LIMIT {num_candidates}"
+                            f"),"
+                            f" scored_results AS ("
+                            f"  SELECT *, {score_expr} AS _score"
+                            f"      FROM fulltext_results"
+                            f"      WHERE {vector_search_filter}"
+                            f"),"
+                            f" group_results AS ("
+                            f"  SELECT *, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY _score DESC) as rn"
+                            f"      FROM scored_results"
+                            f")"
+                            f"  SELECT {fields_expr}, _score"
+                            f"      FROM group_results"
+                            f"      WHERE rn = 1"
+                            f"      ORDER BY _score DESC"
+                            f"      LIMIT {offset}, {limit}"
+                        )
+                    else:
+                        fusion_sql = (
+                            f"WITH fulltext_results AS ("
+                            f"  SELECT {fulltext_search_hint} *, {fulltext_search_score_expr} AS relevance"
+                            f"      FROM {index_name}"
+                            f"      WHERE {filters_expr} AND {fulltext_search_filter}"
+                            f"      ORDER BY relevance DESC"
+                            f"      LIMIT {num_candidates}"
+                            f")"
+                            f"  SELECT {fields_expr}, {score_expr} AS _score"
+                            f"      FROM fulltext_results"
+                            f"      WHERE {vector_search_filter}"
+                            f"      ORDER BY _score DESC"
+                            f"      LIMIT {offset}, {limit}"
+                        )
                 else:
-                    fusion_sql = (
-                        f"WITH fulltext_results AS ("
-                        f"  SELECT {fulltext_search_hint} *, {fulltext_search_score_expr} AS relevance"
-                        f"      FROM {index_name}"
-                        f"      WHERE {filters_expr} AND {fulltext_search_filter}"
-                        f"      ORDER BY relevance DESC"
-                        f"      LIMIT {num_candidates}"
-                        f")"
-                        f"  SELECT {fields_expr}, {score_expr} AS _score"
-                        f"      FROM fulltext_results"
-                        f"      WHERE {vector_search_filter}"
-                        f"      ORDER BY _score DESC"
-                        f"      LIMIT {offset}, {limit}"
+                    join_fields_expr = ", ".join([f"t.{f} as {f}" for f in output_fields if f != "_score"])
+                    relevance_norm_expr = "IFNULL(f.relevance / NULLIF((SELECT MAX(relevance) FROM fulltext_results), 0), 0)"
+                    score_expr = (
+                        f"({relevance_norm_expr} * {1 - vector_similarity_weight}"
+                        f" + IFNULL(v.similarity, 0) * {vector_similarity_weight}"
+                        f" + (CAST(IFNULL(COALESCE(f.{PAGERANK_FLD}, v.{PAGERANK_FLD}), 0) AS DECIMAL(10, 2)) / 100))"
                     )
+                    if group_results:
+                        fusion_sql = (
+                            f"WITH fulltext_results AS ("
+                            f"  SELECT {fulltext_search_hint} id, {PAGERANK_FLD}, {fulltext_search_score_expr} AS relevance"
+                            f"      FROM {index_name}"
+                            f"      WHERE {filters_expr} AND {fulltext_search_filter}"
+                            f"      ORDER BY relevance DESC"
+                            f"      LIMIT {fulltext_topn}"
+                            f"),"
+                            f"vector_results AS ("
+                            f"  SELECT id, {PAGERANK_FLD}, {vector_search_score_expr} AS similarity"
+                            f"      FROM {index_name}"
+                            f"      WHERE {filters_expr} AND {vector_search_filter}"
+                            f"      ORDER BY {vector_search_expr}"
+                            f"      APPROXIMATE LIMIT {vector_topn}"
+                            f"),"
+                            f"combined_results AS ("
+                            f"  SELECT COALESCE(f.id, v.id) AS id, {score_expr} AS score"
+                            f"      FROM fulltext_results f"
+                            f"      FULL OUTER JOIN vector_results v"
+                            f"      ON f.id = v.id"
+                            f"),"
+                            f"joined_results AS ("
+                            f"  SELECT {join_fields_expr}, c.score AS _score, t.group_id as group_id"
+                            f"      FROM combined_results c"
+                            f"      JOIN {index_name} t"
+                            f"      ON c.id = t.id"
+                            f"),"
+                            f"group_results AS ("
+                            f"  SELECT *, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY _score DESC) as rn"
+                            f"      FROM joined_results"
+                            f")"
+                            f"  SELECT {fields_expr}, _score"
+                            f"      FROM group_results"
+                            f"      WHERE rn = 1"
+                            f"      ORDER BY _score DESC"
+                            f"      LIMIT {offset}, {limit}"
+                        )
+                    else:
+                        fusion_sql = (
+                            f"WITH fulltext_results AS ("
+                            f"  SELECT {fulltext_search_hint} id, {PAGERANK_FLD}, {fulltext_search_score_expr} AS relevance"
+                            f"      FROM {index_name}"
+                            f"      WHERE {filters_expr} AND {fulltext_search_filter}"
+                            f"      ORDER BY relevance DESC"
+                            f"      LIMIT {fulltext_topn}"
+                            f"),"
+                            f"vector_results AS ("
+                            f"  SELECT id, {PAGERANK_FLD}, {vector_search_score_expr} AS similarity"
+                            f"      FROM {index_name}"
+                            f"      WHERE {filters_expr} AND {vector_search_filter}"
+                            f"      ORDER BY {vector_search_expr}"
+                            f"      APPROXIMATE LIMIT {vector_topn}"
+                            f"),"
+                            f"combined_results AS ("
+                            f"  SELECT COALESCE(f.id, v.id) AS id, {score_expr} AS score"
+                            f"      FROM fulltext_results f"
+                            f"      FULL OUTER JOIN vector_results v"
+                            f"      ON f.id = v.id"
+                            f")"
+                            f"  SELECT {join_fields_expr}, c.score as _score"
+                            f"      FROM combined_results c"
+                            f"      JOIN {index_name} t"
+                            f"      ON c.id = t.id"
+                            f"      ORDER BY score DESC"
+                            f"      LIMIT {offset}, {limit}"
+                        )
                 logger.debug("OBConnection.search with fusion sql: %s", fusion_sql)
 
                 start_time = time.time()
