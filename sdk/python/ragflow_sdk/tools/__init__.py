@@ -18,6 +18,7 @@ from .batch_uploader import BatchUploader
 from .document_extractor import DocumentExtractor
 from .file_reader import FileReader
 from .field_mapper import FieldMapper
+from .reparse_failed_documents import FailedDocumentReparser
 from .models import FileType, DocumentFormat, Document, DocumentMetadata, FieldMappingConfig, FileCursor, Snapshot, BatchInfo
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "DocumentExtractor",
     "FileReader",
     "FieldMapper",
+    "FailedDocumentReparser",
     "FileType",
     "DocumentFormat",
     "Document",

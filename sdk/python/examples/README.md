@@ -4,6 +4,111 @@
 
 ## 示例脚本
 
+### reparse_failed_documents.py
+
+用于重新解析数据集中所有失败文档的工具。
+
+#### 功能特性
+
+- ✅ 自动查找失败的文档（状态为 "FAIL"）
+- ✅ 分页获取文档，支持大数据集
+- ✅ 批量重新解析，可配置批次大小
+- ✅ 自动重试机制（指数退避）
+- ✅ 进度跟踪和日志记录
+
+#### 使用方法
+
+##### 基本用法
+
+```bash
+python examples/reparse_failed_documents.py \
+    -k YOUR_API_KEY \
+    -H http://localhost:9380 \
+    -i DATASET_ID
+```
+
+##### 自定义批次大小
+
+```bash
+python examples/reparse_failed_documents.py \
+    -k YOUR_API_KEY \
+    -H http://localhost:9380 \
+    -i DATASET_ID \
+    -b 100
+```
+
+##### 自定义页面大小
+
+```bash
+python examples/reparse_failed_documents.py \
+    -k YOUR_API_KEY \
+    -H http://localhost:9380 \
+    -i DATASET_ID \
+    --page-size 5000
+```
+
+#### 参数说明
+
+| 参数 | 简写 | 必需 | 说明 |
+|------|------|------|------|
+| `--api-key` | `-k` | 是 | RAGFlow API 密钥 |
+| `--host-address` | `-H` | 是 | RAGFlow 服务器地址（如：http://localhost:9380） |
+| `--dataset-id` | `-i` | 是 | 要重新解析的数据集 ID |
+| `--batch-size` | `-b` | 否 | 重新解析文档的批次大小（默认：50） |
+| `--page-size` | - | 否 | 获取文档的页面大小（默认：10000） |
+| `--log-file` | - | 否 | 日志文件路径（默认：./logs/reparse_failed_documents.log） |
+
+#### 编程方式使用
+
+```python
+from ragflow_sdk import RAGFlow
+from ragflow_sdk.tools import FailedDocumentReparser
+
+# 初始化
+rag = RAGFlow(api_key="YOUR_API_KEY", base_url="http://localhost:9380")
+
+# 创建重新解析器
+reparser = FailedDocumentReparser(rag)
+
+# 重新解析失败的文档
+total_failed, total_reparsed = reparser.reparse_failed_documents(
+    dataset_id="DATASET_ID",
+    reparse_batch_size=50,
+    page_size=10000
+)
+
+print(f"Total failed documents: {total_failed}")
+print(f"Total reparsed: {total_reparsed}")
+```
+
+#### 工作原理
+
+1. **分页获取文档**：从数据集的第一页开始，逐页获取所有文档
+2. **过滤失败文档**：检查每个文档的 `run` 状态，筛选出状态为 "FAIL" 的文档
+3. **批量重新解析**：当累积的失败文档数量达到 `reparse_batch_size` 时，批量调用 `async_parse_documents` 重新解析
+4. **自动重试**：如果重新解析失败，会自动重试（最多 10 次，使用指数退避策略）
+5. **处理剩余文档**：处理完所有页面后，处理剩余的失败文档（如果数量不足一个批次）
+
+#### 注意事项
+
+1. **批次大小**：较大的批次大小可以提高效率，但会增加单次 API 调用的负担
+2. **页面大小**：较大的页面大小可以减少 API 调用次数，但会增加内存使用
+3. **网络稳定性**：如果网络不稳定，建议使用较小的批次大小
+4. **数据集权限**：确保 API 密钥有权限访问指定的数据集
+
+#### 故障排除
+
+**问题：找不到数据集**
+- 检查数据集 ID 是否正确
+- 确认 API 密钥有权限访问该数据集
+
+**问题：重新解析失败**
+- 检查网络连接
+- 查看日志中的错误信息
+- 检查文档是否真的处于失败状态
+
+---
+
 ### batch_upload.py
 
 通用的批量文档上传工具，支持多种文件格式和灵活的字段映射。
