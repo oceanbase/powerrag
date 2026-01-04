@@ -60,8 +60,7 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Prepare dependencies for arm64
-        if: matrix.platform == 'linux/arm64'
+      - name: Prepare dependencies
         run: |
           echo "Setting up Python..."
           sudo apt-get update
@@ -77,10 +76,9 @@ jobs:
           
           echo "Dependencies prepared successfully"
 
-      - name: Build dependency image for arm64
-        if: matrix.platform == 'linux/arm64'
+      - name: Build dependency image
         run: |
-          echo "Building dependency image for arm64 build..."
+          echo "Building dependency image..."
           docker build \
             --file /mnt/powerrag/Dockerfile.deps \
             --tag infiniflow/ragflow_deps:latest \
