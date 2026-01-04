@@ -22,7 +22,7 @@ instead of processing them synchronously in the HTTP service.
 """
 
 import logging
-from flask import Blueprint, request, jsonify
+from quart import Blueprint, request, jsonify
 
 from powerrag.server.services.task_queue_service import PowerRAGTaskQueueService
 
@@ -32,7 +32,7 @@ task_bp = Blueprint("powerrag_tasks", __name__)
 
 
 @task_bp.route("/parse/async", methods=["POST"])
-def parse_document_async():
+async def parse_document_async():
     """
     Create an async parsing task using task_executor
     
@@ -62,7 +62,7 @@ def parse_document_async():
         }
     """
     try:
-        data = request.get_json()
+        data = await request.get_json()
         
         if not data:
             return jsonify({
@@ -112,7 +112,7 @@ def parse_document_async():
 
 
 @task_bp.route("/task/<task_id>", methods=["GET"])
-def get_task_status(task_id):
+async def get_task_status(task_id):
     """
     Get task status and progress
     
@@ -151,7 +151,7 @@ def get_task_status(task_id):
 
 
 @task_bp.route("/task/<task_id>/cancel", methods=["POST"])
-def cancel_task(task_id):
+async def cancel_task(task_id):
     """
     Cancel a running task
     
@@ -184,7 +184,7 @@ def cancel_task(task_id):
 
 
 @task_bp.route("/document/<doc_id>/chunks", methods=["GET"])
-def get_document_chunks(doc_id):
+async def get_document_chunks(doc_id):
     """
     Get parsed chunks for a completed document
     

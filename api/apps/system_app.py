@@ -217,7 +217,7 @@ def new_token():
         obj = {
             "tenant_id": tenant_id,
             "token": generate_confirmation_token(),
-            "beta": generate_confirmation_token().replace("ragflow-", "")[:32],
+            "beta": generate_confirmation_token().replace("powerrag-", "")[:32],
             "create_time": current_timestamp(),
             "create_date": datetime_format(datetime.now()),
             "update_time": None,
