@@ -56,6 +56,31 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Prepare dependencies
+        run: |
+          echo "Setting up Python..."
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-pip
+
+          echo "Installing Python dependencies..."
+          python3 -m pip install --upgrade pip
+          python3 -m pip install huggingface-hub nltk
+
+          echo "Downloading dependencies..."
+          cd /mnt/powerrag
+          python3 download_deps.py
+
+          echo "Dependencies prepared successfully"
+
+      - name: Build dependency image
+        run: |
+          echo "Building dependency image..."
+          docker build \
+            --file /mnt/powerrag/Dockerfile.deps \
+            --tag infiniflow/ragflow_deps:latest \
+            /mnt/powerrag
+          echo "Dependency image built successfully"
+
       - name: Build and push image
         run: |
           if [ "${{ github.event_name }}" == "pull_request" ]; then
