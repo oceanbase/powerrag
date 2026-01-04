@@ -446,7 +446,13 @@ async def list_tools(*, connector) -> list[types.Tool]:
 
 @app.call_tool()
 @with_api_key(required=True)
-async def call_tool(name: str, arguments: dict, *, connector) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
+async def call_tool(
+    name: str,
+    arguments: dict,
+    *,
+    connector,
+) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
+
     if name == "ragflow_retrieval":
         document_ids = arguments.get("document_ids", [])
         dataset_ids = arguments.get("dataset_ids", [])
@@ -460,23 +466,18 @@ async def call_tool(name: str, arguments: dict, *, connector) -> list[types.Text
         rerank_id = arguments.get("rerank_id")
         force_refresh = arguments.get("force_refresh", False)
 
-        
-        # If no dataset_ids provided or empty list, get all available dataset IDs
+        # Auto-expand datasets if none provided
         if not dataset_ids:
             dataset_list_str = connector.list_datasets()
             dataset_ids = []
-            
-            # Parse the dataset list to extract IDs
+
             if dataset_list_str:
-                for line in dataset_list_str.strip().split('\n'):
-                    if line.strip():
-                        try:
-                            dataset_info = json.loads(line.strip())
-                            dataset_ids.append(dataset_info["id"])
-                        except (json.JSONDecodeError, KeyError):
-                            # Skip malformed lines
-                            continue
-        
+                for line in dataset_list_str.strip().split("\n"):
+                    try:
+                        dataset_ids.append(json.loads(line)["id"])
+                    except Exception:
+                        continue
+
         return connector.retrieval(
             dataset_ids=dataset_ids,
             document_ids=document_ids,
@@ -490,9 +491,32 @@ async def call_tool(name: str, arguments: dict, *, connector) -> list[types.Text
             rerank_id=rerank_id,
             force_refresh=force_refresh,
         )
+
+    elif name == "ragflow_dataset_summary":
+        dataset_list_str = connector.list_datasets()
+        datasets = []
+
+        if dataset_list_str:
+            for line in dataset_list_str.split("\n"):
+                try:
+                    datasets.append(json.loads(line))
+                except Exception:
+                    continue
+
+        return [
+            types.TextContent(
+                type="text",
+                text=json.dumps(
+                    {
+                        "dataset_count": len(datasets),
+                        "datasets": datasets,
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        ]
+
     raise ValueError(f"Tool not found: {name}")
-
-
 def create_starlette_app():
     routes = []
     middleware = None
