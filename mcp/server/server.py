@@ -149,23 +149,7 @@ class RAGFlowConnector:
     ):
         if document_ids is None:
             document_ids = []
-        
-        # If no dataset_ids provided or empty list, get all available dataset IDs
-        if not dataset_ids:
-            dataset_list_str = self.list_datasets()
-            dataset_ids = []
-            
-            # Parse the dataset list to extract IDs
-            if dataset_list_str:
-                for line in dataset_list_str.strip().split('\n'):
-                    if line.strip():
-                        try:
-                            dataset_info = json.loads(line.strip())
-                            dataset_ids.append(dataset_info["id"])
-                        except (json.JSONDecodeError, KeyError):
-                            # Skip malformed lines
-                            continue
-        
+         
         data_json = {
             "page": page,
             "page_size": page_size,
@@ -369,72 +353,77 @@ async def list_tools(*, connector) -> list[types.Tool]:
 
     return [
         types.Tool(
+            name="ragflow_dataset_summary",
+            description="Return a summary of all available datasets, including count and metadata.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
+        types.Tool(
             name="ragflow_retrieval",
-            description="Retrieve relevant chunks from the RAGFlow retrieve interface based on the question. You can optionally specify dataset_ids to search only specific datasets, or omit dataset_ids entirely to search across ALL available datasets. You can also optionally specify document_ids to search within specific documents. When dataset_ids is not provided or is empty, the system will automatically search across all available datasets. Below is the list of all available datasets, including their descriptions and IDs:"
-            + dataset_description,
+            description=(
+                "Retrieve relevant chunks from the RAGFlow retrieve interface based on the question. "
+                "You can optionally specify dataset_ids to search only specific datasets, or omit "
+                "dataset_ids entirely to search across ALL available datasets. You can also optionally "
+                "specify document_ids to search within specific documents. When dataset_ids is not "
+                "provided or is empty, the system will automatically search across all available "
+                "datasets. Below is the list of all available datasets, including their descriptions "
+                "and IDs:\n"
+                + dataset_description
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "dataset_ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional array of dataset IDs to search. If not provided or empty, all datasets will be searched."
                     },
                     "document_ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional array of document IDs to search within."
                     },
                     "question": {
                         "type": "string",
-                        "description": "The question or query to search for."
                     },
                     "page": {
                         "type": "integer",
-                        "description": "Page number for pagination",
                         "default": 1,
                         "minimum": 1,
                     },
                     "page_size": {
                         "type": "integer",
-                        "description": "Number of results to return per page (default: 10, max recommended: 50 to avoid token limits)",
                         "default": 10,
                         "minimum": 1,
                         "maximum": 100,
                     },
                     "similarity_threshold": {
                         "type": "number",
-                        "description": "Minimum similarity threshold for results",
                         "default": 0.2,
                         "minimum": 0.0,
                         "maximum": 1.0,
                     },
                     "vector_similarity_weight": {
                         "type": "number",
-                        "description": "Weight for vector similarity vs term similarity",
                         "default": 0.3,
                         "minimum": 0.0,
                         "maximum": 1.0,
                     },
                     "keyword": {
                         "type": "boolean",
-                        "description": "Enable keyword-based search",
                         "default": False,
                     },
                     "top_k": {
                         "type": "integer",
-                        "description": "Maximum results to consider before ranking",
                         "default": 1024,
                         "minimum": 1,
                         "maximum": 1024,
                     },
                     "rerank_id": {
                         "type": "string",
-                        "description": "Optional reranking model identifier",
                     },
                     "force_refresh": {
                         "type": "boolean",
-                        "description": "Set to true only if fresh dataset and document metadata is explicitly required. Otherwise, cached metadata is used (default: false).",
                         "default": False,
                     },
                 },
@@ -442,8 +431,7 @@ async def list_tools(*, connector) -> list[types.Tool]:
             },
         ),
     ]
-
-
+    
 @app.call_tool()
 @with_api_key(required=True)
 async def call_tool(
@@ -455,7 +443,9 @@ async def call_tool(
 
     if name == "ragflow_retrieval":
         document_ids = arguments.get("document_ids", [])
-        dataset_ids = arguments.get("dataset_ids", [])
+        dataset_ids = arguments.get("dataset_ids") or []
+
+
         question = arguments.get("question", "")
         page = arguments.get("page", 1)
         page_size = arguments.get("page_size", 10)
@@ -517,7 +507,10 @@ async def call_tool(
         ]
 
     raise ValueError(f"Tool not found: {name}")
+
+
 def create_starlette_app():
+
     routes = []
     middleware = None
     if MODE == LaunchMode.HOST:
