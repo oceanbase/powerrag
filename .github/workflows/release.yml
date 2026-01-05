@@ -3,7 +3,7 @@ name: release
 on:
   push:
     branches:
-      - "v*"
+      - "main"
     tags:
       - "*"
 
@@ -13,7 +13,7 @@ concurrency:
 
 env:
   DOCKER_REPO: ${{ vars.DOCKER_REPO || 'oceanbase' }}
-  IMAGE_TAG: ${{ vars.DOCKER_REPO || 'oceanbase' }}/powerrag:${{ github.ref_name }}
+  IMAGE_TAG: ${{ vars.DOCKER_REPO || 'oceanbase' }}/powerrag:${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
 
 jobs:
   build:
