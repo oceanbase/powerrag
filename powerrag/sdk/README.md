@@ -43,7 +43,7 @@ pip install -e .
 
 ### 依赖要求
 
-- Python 3.8+
+- Python 3.10+
 - requests >= 2.28.0
 - typing-extensions (Python < 3.11)
 
