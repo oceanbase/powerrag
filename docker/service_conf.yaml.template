@@ -40,7 +40,7 @@ gotenberg:
   url: '${GOTENBERG_URL}'
   timeout: 60
 mineru:
-  hosts: '${MINERU_URL}'  # MinerU API service URL (启动 docker-compose mineru-api 服务后使用)
+  hosts: '${MINERU_API_URL}'  # MinerU API service URL (启动 docker-compose mineru-api 服务后使用)
   backend: '${MINERU_BACKEND}'  # 或 'vlm-http-client' 如果使用 vllm-server
   server_url: '${MINERU_VLM_URL}'  # 仅当 backend 为 vlm-http-client 时需要
   # 如果不配置此项，将自动降级到本地 mineru CLI（需要通过 pip install -U 'mineru[core]' 安装）
