@@ -17,10 +17,13 @@ import { DocumentParserType } from '@/constants/knowledge';
 import { useFetchKnowledgeBaseConfiguration } from '@/hooks/use-knowledge-request';
 import { IModalProps } from '@/interfaces/common';
 import { IParserConfig } from '@/interfaces/database/document';
-import { IChangeParserRequestBody } from '@/interfaces/request/document';
+import { IChangeParserConfigRequestBody } from '@/interfaces/request/document';
+import { MetadataType } from '@/pages/dataset/components/metedata/hooks/use-manage-modal';
 import {
+  AutoMetadata,
   ChunkMethodItem,
   EnableTocToggle,
+  ImageContextWindow,
   ParseTypeItem,
 } from '@/pages/dataset/dataset-setting/configuration/common-item';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -34,6 +37,7 @@ import {
   AutoKeywordsFormField,
   AutoQuestionsFormField,
 } from '../auto-keywords-form-field';
+import { ChildrenDelimiterForm } from '../children-delimiter-form';
 import { DataFlowSelect } from '../data-pipeline-select';
 import { DelimiterFormField } from '../delimiter-form-field';
 import { EntityTypesFormField } from '../entity-types-form-field';
@@ -41,9 +45,7 @@ import { ExcelToHtmlFormField } from '../excel-to-html-form-field';
 import { FormContainer } from '../form-container';
 import { LayoutRecognizeFormField } from '../layout-recognize-form-field';
 import { MaxTokenNumberFormField } from '../max-token-number-from-field';
-import { PdfParserFormField } from '../pdf-parser-form-field';
-import { RegexPatternFormField } from '../regex-pattern-form-field';
-import { TitleLevelFormField } from '../title-level-form-field';
+import { MinerUOptionsFormField } from '../mineru-options-form-field';
 import { ButtonLoading } from '../ui/button';
 import { Input } from '../ui/input';
 import { DynamicPageRange } from './dynamic-page-range';
@@ -55,7 +57,11 @@ import {
 
 const FormId = 'ChunkMethodDialogForm';
 
-interface IProps extends IModalProps<IChangeParserRequestBody> {
+interface IProps
+  extends IModalProps<{
+    parserId: string;
+    parserConfig: IChangeParserConfigRequestBody;
+  }> {
   loading: boolean;
   parserId: string;
   pipelineId?: string;
@@ -92,7 +98,7 @@ export function ChunkMethodDialog({
     return knowledgeDetails.parser_config?.graphrag?.use_graphrag;
   }, [knowledgeDetails.parser_config?.graphrag?.use_graphrag]);
 
-  const defaultParserValues = useDefaultParserValues(parserId);
+  const defaultParserValues = useDefaultParserValues();
 
   const fillDefaultParserValue = useFillDefaultValueOnMount();
 
@@ -109,16 +115,19 @@ export function ChunkMethodDialog({
       parser_config: z.object({
         task_page_size: z.coerce.number().optional(),
         layout_recognize: z.string().optional(),
-        pdf_parser: z.string().optional(),
-        title_level: z.coerce.number().optional(),
         chunk_token_num: z.coerce.number().optional(),
-        min_chunk_tokens: z.coerce.number().optional(),
         delimiter: z.string().optional(),
-        regex_pattern: z.string().optional(),
+        enable_children: z.boolean().optional(),
+        children_delimiter: z.string().optional(),
         auto_keywords: z.coerce.number().optional(),
         auto_questions: z.coerce.number().optional(),
         html4excel: z.boolean().optional(),
         toc_extraction: z.boolean().optional(),
+        image_table_context_window: z.coerce.number().optional(),
+        mineru_parse_method: z.enum(['auto', 'txt', 'ocr']).optional(),
+        mineru_formula_enable: z.boolean().optional(),
+        mineru_table_enable: z.boolean().optional(),
+        mineru_lang: z.string().optional(),
         // raptor: z
         //   .object({
         //     use_raptor: z.boolean().optional(),
@@ -136,6 +145,18 @@ export function ChunkMethodDialog({
         pages: z
           .array(z.object({ from: z.coerce.number(), to: z.coerce.number() }))
           .optional(),
+        metadata: z
+          .array(
+            z
+              .object({
+                key: z.string().optional(),
+                description: z.string().optional(),
+                enum: z.array(z.string().optional()).optional(),
+              })
+              .optional(),
+          )
+          .optional(),
+        enable_metadata: z.boolean().optional(),
       }),
     })
     .superRefine((data, ctx) => {
@@ -167,6 +188,9 @@ export function ChunkMethodDialog({
     name: 'parser_id',
     control: form.control,
   });
+  const isMineruSelected =
+    selectedTag?.toLowerCase().includes('mineru') ||
+    layoutRecognize?.toLowerCase?.()?.includes('mineru');
 
   const isPdf = documentExtension === 'pdf';
 
@@ -174,39 +198,18 @@ export function ChunkMethodDialog({
     return isPdf && hidePagesChunkMethods.every((x) => x !== selectedTag);
   }, [selectedTag, isPdf]);
 
-  const showPdfParser = useMemo(() => {
-    // Show PDF parser for Title and Smart parsers regardless of file type
-    // For Regex, only show for PDF files
-    return (
-      selectedTag === DocumentParserType.Title ||
-      selectedTag === DocumentParserType.Smart ||
-      (isPdf && selectedTag === DocumentParserType.Regex)
-    );
-  }, [selectedTag, isPdf]);
-
-  const showTitleLevel = useMemo(() => {
-    return selectedTag === DocumentParserType.Title;
-  }, [selectedTag]);
-
   const showOne = useMemo(() => {
-    // Don't show LayoutRecognizeFormField if PdfParserFormField is shown (for title/regex/smart)
-    if (showPdfParser) {
-      return false;
-    }
     return (
       isPdf &&
       hidePagesChunkMethods
         .filter((x) => x !== DocumentParserType.One)
         .every((x) => x !== selectedTag)
     );
-  }, [selectedTag, isPdf, showPdfParser]);
+  }, [selectedTag, isPdf]);
 
   const showMaxTokenNumber =
     selectedTag === DocumentParserType.Naive ||
-    selectedTag === DocumentParserType.KnowledgeGraph ||
-    selectedTag === DocumentParserType.Regex ||
-    selectedTag === DocumentParserType.Title ||
-    selectedTag === DocumentParserType.Smart;
+    selectedTag === DocumentParserType.KnowledgeGraph;
 
   const showEntityTypes = selectedTag === DocumentParserType.KnowledgeGraph;
 
@@ -217,22 +220,22 @@ export function ChunkMethodDialog({
 
   async function onSubmit(data: z.infer<typeof FormSchema>) {
     console.log('🚀 ~ onSubmit ~ data:', data);
-    const parserConfig: any = { ...data.parser_config };
-    // Remove pdf_parser field - PDF parser is stored in layout_recognize
-    delete parserConfig.pdf_parser;
-
-    // Handle Regex parser - remove pdf_parser and title_level
-    if (data.parser_id === 'regex') {
-      delete parserConfig.title_level;
-    }
-
-    const nextData: IChangeParserRequestBody = {
-      parser_id: data.parser_id,
-      pipeline_id: data.pipeline_id || '',
-      doc_id: documentId,
+    const parserConfig = data.parser_config;
+    const imageTableContextWindow = Number(
+      parserConfig?.image_table_context_window || 0,
+    );
+    const nextData = {
+      ...data,
       parser_config: {
         ...parserConfig,
-        pages: data.parser_config?.pages?.map((x: any) => [x.from, x.to]) ?? [],
+        image_table_context_window: imageTableContextWindow,
+        image_context_size: imageTableContextWindow,
+        table_context_size: imageTableContextWindow,
+        // Unset children delimiter if this option is not enabled
+        children_delimiter: parserConfig.enable_children
+          ? parserConfig.children_delimiter
+          : '',
+        pages: parserConfig?.pages?.map((x: any) => [x.from, x.to]) ?? [],
       },
     };
     console.log('🚀 ~ onSubmit ~ nextData:', nextData);
@@ -250,20 +253,21 @@ export function ChunkMethodDialog({
         parser_id: parserId || '',
         pipeline_id: pipelineId || '',
         parseType: pipelineId ? 2 : 1,
-        parser_config: fillDefaultParserValue(
-          {
-            pages: pages.length > 0 ? pages : [{ from: 1, to: 1024 }],
-            ...omit(parserConfig, 'pages'),
-            // graphrag: {
-            //   use_graphrag: get(
-            //     parserConfig,
-            //     'graphrag.use_graphrag',
-            //     useGraphRag,
-            //   ),
-            // },
-          },
-          parserId || '',
-        ),
+        parser_config: fillDefaultParserValue({
+          pages: pages.length > 0 ? pages : [{ from: 1, to: 1024 }],
+          ...omit(parserConfig, 'pages'),
+          image_table_context_window:
+            parserConfig?.image_table_context_window ??
+            parserConfig?.image_context_size ??
+            parserConfig?.table_context_size,
+          // graphrag: {
+          //   use_graphrag: get(
+          //     parserConfig,
+          //     'graphrag.use_graphrag',
+          //     useGraphRag,
+          //   ),
+          // },
+        }),
       });
     }
   }, [
@@ -286,28 +290,6 @@ export function ChunkMethodDialog({
       form.setValue('pipeline_id', '');
     }
   }, [parseType, form]);
-
-  // Set default values when Title or Regex parser is selected
-  useEffect(() => {
-    if (selectedTag === DocumentParserType.Title) {
-      const currentTitleLevel = form.getValues('parser_config.title_level');
-      // Only set default if title_level is truly missing (undefined or null), not if it's 0 or other falsy values
-      if (currentTitleLevel === undefined || currentTitleLevel === null) {
-        form.setValue('parser_config.title_level', 3);
-      }
-    } else if (selectedTag === DocumentParserType.Regex) {
-      const currentRegexPattern = form.getValues('parser_config.regex_pattern');
-      const currentDelimiter = form.getValues('parser_config.delimiter');
-      // Set default regex_pattern if not already set
-      if (!currentRegexPattern) {
-        form.setValue('parser_config.regex_pattern', '[.!?]+\\s*');
-      }
-      // Set default delimiter for regex parser if not already set
-      if (!currentDelimiter || currentDelimiter === '\n') {
-        form.setValue('parser_config.delimiter', '\n。.；;！!？？');
-      }
-    }
-  }, [selectedTag, form]);
   return (
     <Dialog open onOpenChange={hideModal}>
       <DialogContent className="max-w-[50vw] text-text-primary">
@@ -378,20 +360,14 @@ export function ChunkMethodDialog({
             {parseType === 1 && (
               <>
                 <FormContainer
-                  show={
-                    showOne ||
-                    showMaxTokenNumber ||
-                    showPdfParser ||
-                    showTitleLevel
-                  }
+                  show={showOne || showMaxTokenNumber}
                   className="space-y-3"
                 >
-                  {showPdfParser && <PdfParserFormField></PdfParserFormField>}
-                  {showTitleLevel && (
-                    <TitleLevelFormField></TitleLevelFormField>
-                  )}
                   {showOne && (
-                    <LayoutRecognizeFormField></LayoutRecognizeFormField>
+                    <>
+                      <LayoutRecognizeFormField showMineruOptions={false} />
+                      {isMineruSelected && <MinerUOptionsFormField />}
+                    </>
                   )}
                   {showMaxTokenNumber && (
                     <>
@@ -401,67 +377,32 @@ export function ChunkMethodDialog({
                             ? 8192 * 2
                             : 2048
                         }
-                        initialValue={
-                          selectedTag === DocumentParserType.Regex
-                            ? 512
-                            : selectedTag === DocumentParserType.Title ||
-                                selectedTag === DocumentParserType.Smart
-                              ? 256
-                              : undefined
-                        }
                       ></MaxTokenNumberFormField>
-                      {selectedTag === DocumentParserType.Smart && (
-                        <FormField
-                          control={form.control}
-                          name="parser_config.min_chunk_tokens"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel
-                                tooltip={t(
-                                  'knowledgeConfiguration.minChunkTokensDescription',
-                                )}
-                              >
-                                {t('knowledgeConfiguration.minChunkTokens')}
-                              </FormLabel>
-                              <FormControl>
-                                <Input
-                                  type="number"
-                                  min={32}
-                                  max={1024}
-                                  value={field.value as number}
-                                  onChange={(e) =>
-                                    field.onChange(Number(e.target.value))
-                                  }
-                                  onBlur={field.onBlur}
-                                  name={field.name}
-                                  ref={field.ref}
-                                />
-                              </FormControl>
-                            </FormItem>
-                          )}
-                        />
-                      )}
-                      {selectedTag === DocumentParserType.Regex && (
-                        <RegexPatternFormField />
-                      )}
-                      {(selectedTag === DocumentParserType.Naive ||
-                        selectedTag === DocumentParserType.KnowledgeGraph ||
-                        selectedTag === DocumentParserType.Regex ||
-                        selectedTag === DocumentParserType.Title) && (
-                        <DelimiterFormField></DelimiterFormField>
-                      )}
+                      <DelimiterFormField></DelimiterFormField>
+                      <ChildrenDelimiterForm />
                     </>
                   )}
                 </FormContainer>
                 <FormContainer
-                  show={showAutoKeywords(selectedTag) || showExcelToHtml}
+                  show={
+                    isMineruSelected ||
+                    showAutoKeywords(selectedTag) ||
+                    showExcelToHtml
+                  }
                   className="space-y-3"
                 >
                   {selectedTag === DocumentParserType.Naive && (
-                    <EnableTocToggle />
+                    <>
+                      <EnableTocToggle />
+                      <ImageContextWindow />
+                    </>
                   )}
                   {showAutoKeywords(selectedTag) && (
                     <>
+                      <AutoMetadata
+                        type={MetadataType.SingleFileSetting}
+                        otherData={{ documentId }}
+                      />
                       <AutoKeywordsFormField></AutoKeywordsFormField>
                       <AutoQuestionsFormField></AutoQuestionsFormField>
                     </>

@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useNavigatePage } from '@/hooks/logic-hooks/navigate-hooks';
 import { Settings, Trash2 } from 'lucide-react';
+import { useDataSourceInfo } from '../constant';
 import { useDeleteDataSource } from '../hooks';
 import { IDataSorceInfo, IDataSourceBase } from '../interface';
 import { delSourceModal } from './delete-source-modal';
@@ -13,6 +14,7 @@ export const AddedSourceCard = (props: IAddedSourceCardProps) => {
   const { list, name, icon } = props;
   const { handleDelete } = useDeleteDataSource();
   const { navigateToDataSourceDetail } = useNavigatePage();
+  const { dataSourceInfo } = useDataSourceInfo();
   const toDetail = (id: string) => {
     navigateToDataSourceDetail(id);
   };
@@ -31,7 +33,7 @@ export const AddedSourceCard = (props: IAddedSourceCardProps) => {
             key={item.id}
             className="flex flex-row items-center justify-between rounded-md bg-bg-card px-[10px] py-4"
           >
-            <div className="text-sm text-text-secondary ">{item.name}</div>
+            <div className="text-sm text-text-primary ">{item.name}</div>
             <div className="text-sm text-text-secondary  flex gap-2">
               <Button
                 variant={'ghost'}
@@ -49,6 +51,7 @@ export const AddedSourceCard = (props: IAddedSourceCardProps) => {
                 onClick={() =>
                   delSourceModal({
                     data: item,
+                    dataSourceInfo: dataSourceInfo,
                     onOk: () => {
                       handleDelete(item);
                     },

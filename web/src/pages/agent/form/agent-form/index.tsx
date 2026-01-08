@@ -22,7 +22,8 @@ import { Switch } from '@/components/ui/switch';
 import { LlmModelType } from '@/constants/knowledge';
 import { useFindLlmByUuid } from '@/hooks/use-llm-request';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { memo, useCallback, useEffect, useMemo } from 'react';
+import { get } from 'lodash';
+import { memo, useEffect, useMemo } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
@@ -41,11 +42,14 @@ import { FormWrapper } from '../components/form-wrapper';
 import { Output } from '../components/output';
 import { PromptEditor } from '../components/prompt-editor';
 import { QueryVariable } from '../components/query-variable';
+import { SchemaDialog } from '../components/schema-dialog';
+import { SchemaPanel } from '../components/schema-panel';
 import { AgentTools, Agents } from './agent-tools';
-import { StructuredOutputDialog } from './structured-output-dialog';
-import { StructuredOutputPanel } from './structured-output-panel';
 import { useBuildPromptExtraPromptOptions } from './use-build-prompt-options';
-import { useShowStructuredOutputDialog } from './use-show-structured-output-dialog';
+import {
+  useHandleShowStructuredOutput,
+  useShowStructuredOutputDialog,
+} from './use-show-structured-output-dialog';
 import { useValues } from './use-values';
 import { useWatchFormChange } from './use-watch-change';
 
@@ -121,22 +125,19 @@ function AgentForm({ node }: INextOperatorForm) {
   });
 
   const {
-    initialStructuredOutput,
     showStructuredOutputDialog,
     structuredOutputDialogVisible,
     hideStructuredOutputDialog,
     handleStructuredOutputDialogOk,
   } = useShowStructuredOutputDialog(node?.id);
 
-  const updateNodeForm = useGraphStore((state) => state.updateNodeForm);
+  const structuredOutput = get(
+    node,
+    `data.form.outputs.${AgentStructuredOutputField}`,
+  );
 
-  const handleShowStructuredOutput = useCallback(
-    (val: boolean) => {
-      if (node?.id && val) {
-        updateNodeForm(node?.id, {}, ['outputs', AgentStructuredOutputField]);
-      }
-    },
-    [node?.id, updateNodeForm],
+  const { handleShowStructuredOutput } = useHandleShowStructuredOutput(
+    node?.id,
   );
 
   useEffect(() => {
@@ -241,7 +242,7 @@ function AgentForm({ node }: INextOperatorForm) {
                 name={`delay_after_error`}
                 render={({ field }) => (
                   <FormItem className="flex-1">
-                    <FormLabel>{t('flow.delayEfterError')}</FormLabel>
+                    <FormLabel>{t('flow.delayAfterError')}</FormLabel>
                     <FormControl>
                       <NumberInput {...field} max={5} step={0.1}></NumberInput>
                     </FormControl>
@@ -326,19 +327,17 @@ function AgentForm({ node }: INextOperatorForm) {
                 </Button>
               </div>
 
-              <StructuredOutputPanel
-                value={initialStructuredOutput}
-              ></StructuredOutputPanel>
+              <SchemaPanel value={structuredOutput}></SchemaPanel>
             </section>
           )}
         </FormWrapper>
       </Form>
       {structuredOutputDialogVisible && (
-        <StructuredOutputDialog
+        <SchemaDialog
           hideModal={hideStructuredOutputDialog}
           onOk={handleStructuredOutputDialogOk}
-          initialValues={initialStructuredOutput}
-        ></StructuredOutputDialog>
+          initialValues={structuredOutput}
+        ></SchemaDialog>
       )}
     </>
   );

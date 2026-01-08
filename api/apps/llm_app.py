@@ -21,12 +21,11 @@ from quart import request
 from api.apps import login_required, current_user
 from api.db.services.tenant_llm_service import LLMFactoriesService, TenantLLMService
 from api.db.services.llm_service import LLMService
-from api.utils.api_utils import server_error_response, get_data_error_result, validate_request
+from api.utils.api_utils import get_allowed_llm_factories, get_data_error_result, get_json_result, get_request_json, server_error_response, validate_request
 from common.constants import StatusEnum, LLMType
 from api.db.db_models import TenantLLM
-from api.utils.api_utils import get_json_result, get_allowed_llm_factories
 from rag.utils.base64_image import test_image
-from rag.llm import EmbeddingModel, ChatModel, RerankModel, CvModel, TTSModel
+from rag.llm import EmbeddingModel, ChatModel, RerankModel, CvModel, TTSModel, OcrModel, Seq2txtModel
 
 
 @manager.route("/factories", methods=["GET"])  # noqa: F821
@@ -44,7 +43,13 @@ def factories():
                 mdl_types[m.fid] = set([])
             mdl_types[m.fid].add(m.model_type)
         for f in fac:
-            f["model_types"] = list(mdl_types.get(f["name"], [LLMType.CHAT, LLMType.EMBEDDING, LLMType.RERANK, LLMType.IMAGE2TEXT, LLMType.SPEECH2TEXT, LLMType.TTS]))
+            f["model_types"] = list(
+                mdl_types.get(
+                    f["name"],
+                    [LLMType.CHAT, LLMType.EMBEDDING, LLMType.RERANK, LLMType.IMAGE2TEXT, LLMType.SPEECH2TEXT, LLMType.TTS, LLMType.OCR],
+                )
+            )
+
         return get_json_result(data=fac)
     except Exception as e:
         return server_error_response(e)
@@ -54,7 +59,7 @@ def factories():
 @login_required
 @validate_request("llm_factory", "api_key")
 async def set_api_key():
-    req = await request.json
+    req = await get_request_json()
     # test if api key works
     chat_passed, embd_passed, rerank_passed = False, False, False
     factory = req["llm_factory"]
@@ -75,7 +80,7 @@ async def set_api_key():
             assert factory in ChatModel, f"Chat model from {factory} is not supported yet."
             mdl = ChatModel[factory](req["api_key"], llm.llm_name, base_url=req.get("base_url"), **extra)
             try:
-                m, tc = mdl.chat(None, [{"role": "user", "content": "Hello! How are you doing!"}], {"temperature": 0.9, "max_tokens": 50})
+                m, tc = await mdl.async_chat(None, [{"role": "user", "content": "Hello! How are you doing!"}], {"temperature": 0.9, "max_tokens": 50})
                 if m.find("**ERROR**") >= 0:
                     raise Exception(m)
                 chat_passed = True
@@ -124,7 +129,7 @@ async def set_api_key():
 @login_required
 @validate_request("llm_factory")
 async def add_llm():
-    req = await request.json
+    req = await get_request_json()
     factory = req["llm_factory"]
     api_key = req.get("api_key", "x")
     llm_name = req.get("llm_name")
@@ -152,7 +157,7 @@ async def add_llm():
     elif factory == "Bedrock":
         # For Bedrock, due to its special authentication method
         # Assemble bedrock_ak, bedrock_sk, bedrock_region
-        api_key = apikey_json(["bedrock_ak", "bedrock_sk", "bedrock_region"])
+        api_key = apikey_json(["auth_mode", "bedrock_ak", "bedrock_sk", "bedrock_region", "aws_role_arn"])
 
     elif factory == "LocalAI":
         llm_name += "___LocalAI"
@@ -187,6 +192,9 @@ async def add_llm():
     elif factory == "OpenRouter":
         api_key = apikey_json(["api_key", "provider_order"])
 
+    elif factory == "MinerU":
+        api_key = apikey_json(["api_key", "provider_order"])
+
     llm = {
         "tenant_id": current_user.id,
         "llm_factory": factory,
@@ -200,61 +208,83 @@ async def add_llm():
     msg = ""
     mdl_nm = llm["llm_name"].split("___")[0]
     extra = {"provider": factory}
-    if llm["model_type"] == LLMType.EMBEDDING.value:
-        assert factory in EmbeddingModel, f"Embedding model from {factory} is not supported yet."
-        mdl = EmbeddingModel[factory](key=llm["api_key"], model_name=mdl_nm, base_url=llm["api_base"])
-        try:
-            arr, tc = mdl.encode(["Test if the api key is available"])
-            if len(arr[0]) == 0:
-                raise Exception("Fail")
-        except Exception as e:
-            msg += f"\nFail to access embedding model({mdl_nm})." + str(e)
-    elif llm["model_type"] == LLMType.CHAT.value:
-        assert factory in ChatModel, f"Chat model from {factory} is not supported yet."
-        mdl = ChatModel[factory](
-            key=llm["api_key"],
-            model_name=mdl_nm,
-            base_url=llm["api_base"],
-            **extra,
-        )
-        try:
-            m, tc = mdl.chat(None, [{"role": "user", "content": "Hello! How are you doing!"}], {"temperature": 0.9})
-            if not tc and m.find("**ERROR**:") >= 0:
-                raise Exception(m)
-        except Exception as e:
-            msg += f"\nFail to access model({factory}/{mdl_nm})." + str(e)
-    elif llm["model_type"] == LLMType.RERANK:
-        assert factory in RerankModel, f"RE-rank model from {factory} is not supported yet."
-        try:
-            mdl = RerankModel[factory](key=llm["api_key"], model_name=mdl_nm, base_url=llm["api_base"])
-            arr, tc = mdl.similarity("Hello~ RAGFlower!", ["Hi, there!", "Ohh, my friend!"])
-            if len(arr) == 0:
-                raise Exception("Not known.")
-        except KeyError:
-            msg += f"{factory} dose not support this model({factory}/{mdl_nm})"
-        except Exception as e:
-            msg += f"\nFail to access model({factory}/{mdl_nm})." + str(e)
-    elif llm["model_type"] == LLMType.IMAGE2TEXT.value:
-        assert factory in CvModel, f"Image to text model from {factory} is not supported yet."
-        mdl = CvModel[factory](key=llm["api_key"], model_name=mdl_nm, base_url=llm["api_base"])
-        try:
-            image_data = test_image
-            m, tc = mdl.describe(image_data)
-            if not tc and m.find("**ERROR**:") >= 0:
-                raise Exception(m)
-        except Exception as e:
-            msg += f"\nFail to access model({factory}/{mdl_nm})." + str(e)
-    elif llm["model_type"] == LLMType.TTS:
-        assert factory in TTSModel, f"TTS model from {factory} is not supported yet."
-        mdl = TTSModel[factory](key=llm["api_key"], model_name=mdl_nm, base_url=llm["api_base"])
-        try:
-            for resp in mdl.tts("Hello~ RAGFlower!"):
-                pass
-        except RuntimeError as e:
-            msg += f"\nFail to access model({factory}/{mdl_nm})." + str(e)
-    else:
-        # TODO: check other type of models
-        pass
+    model_type = llm["model_type"]
+    model_api_key = llm["api_key"]
+    model_base_url = llm.get("api_base", "")
+    match model_type:
+        case LLMType.EMBEDDING.value:
+            assert factory in EmbeddingModel, f"Embedding model from {factory} is not supported yet."
+            mdl = EmbeddingModel[factory](key=model_api_key, model_name=mdl_nm, base_url=model_base_url)
+            try:
+                arr, tc = mdl.encode(["Test if the api key is available"])
+                if len(arr[0]) == 0:
+                    raise Exception("Fail")
+            except Exception as e:
+                msg += f"\nFail to access embedding model({mdl_nm})." + str(e)
+        case LLMType.CHAT.value:
+            assert factory in ChatModel, f"Chat model from {factory} is not supported yet."
+            mdl = ChatModel[factory](
+                key=model_api_key,
+                model_name=mdl_nm,
+                base_url=model_base_url,
+                **extra,
+            )
+            try:
+                m, tc = await mdl.async_chat(None, [{"role": "user", "content": "Hello! How are you doing!"}],
+                                             {"temperature": 0.9})
+                if not tc and m.find("**ERROR**:") >= 0:
+                    raise Exception(m)
+            except Exception as e:
+                msg += f"\nFail to access model({factory}/{mdl_nm})." + str(e)
+
+        case LLMType.RERANK.value:
+            assert factory in RerankModel, f"RE-rank model from {factory} is not supported yet."
+            try:
+                mdl = RerankModel[factory](key=model_api_key, model_name=mdl_nm, base_url=model_base_url)
+                arr, tc = mdl.similarity("Hello~ RAGFlower!", ["Hi, there!", "Ohh, my friend!"])
+                if len(arr) == 0:
+                    raise Exception("Not known.")
+            except KeyError:
+                msg += f"{factory} dose not support this model({factory}/{mdl_nm})"
+            except Exception as e:
+                msg += f"\nFail to access model({factory}/{mdl_nm})." + str(e)
+
+        case LLMType.IMAGE2TEXT.value:
+            assert factory in CvModel, f"Image to text model from {factory} is not supported yet."
+            mdl = CvModel[factory](key=model_api_key, model_name=mdl_nm, base_url=model_base_url)
+            try:
+                image_data = test_image
+                m, tc = mdl.describe(image_data)
+                if not tc and m.find("**ERROR**:") >= 0:
+                    raise Exception(m)
+            except Exception as e:
+                msg += f"\nFail to access model({factory}/{mdl_nm})." + str(e)
+        case LLMType.TTS.value:
+            assert factory in TTSModel, f"TTS model from {factory} is not supported yet."
+            mdl = TTSModel[factory](key=model_api_key, model_name=mdl_nm, base_url=model_base_url)
+            try:
+                for resp in mdl.tts("Hello~ RAGFlower!"):
+                    pass
+            except RuntimeError as e:
+                msg += f"\nFail to access model({factory}/{mdl_nm})." + str(e)
+        case LLMType.OCR.value:
+            assert factory in OcrModel, f"OCR model from {factory} is not supported yet."
+            try:
+                mdl = OcrModel[factory](key=model_api_key, model_name=mdl_nm, base_url=model_base_url)
+                ok, reason = mdl.check_available()
+                if not ok:
+                    raise RuntimeError(reason or "Model not available")
+            except Exception as e:
+                msg += f"\nFail to access model({factory}/{mdl_nm})." + str(e)
+        case LLMType.SPEECH2TEXT:
+            assert factory in Seq2txtModel, f"Speech model from {factory} is not supported yet."
+            try:
+                mdl = Seq2txtModel[factory](key=model_api_key, model_name=mdl_nm, base_url=model_base_url)
+                # TODO: check the availability
+            except Exception as e:
+                msg += f"\nFail to access model({factory}/{mdl_nm})." + str(e)
+        case _:
+            raise RuntimeError(f"Unknown model type: {model_type}")
 
     if msg:
         return get_data_error_result(message=msg)
@@ -269,7 +299,7 @@ async def add_llm():
 @login_required
 @validate_request("llm_factory", "llm_name")
 async def delete_llm():
-    req = await request.json
+    req = await get_request_json()
     TenantLLMService.filter_delete([TenantLLM.tenant_id == current_user.id, TenantLLM.llm_factory == req["llm_factory"], TenantLLM.llm_name == req["llm_name"]])
     return get_json_result(data=True)
 
@@ -278,7 +308,7 @@ async def delete_llm():
 @login_required
 @validate_request("llm_factory", "llm_name")
 async def enable_llm():
-    req = await request.json
+    req = await get_request_json()
     TenantLLMService.filter_update(
         [TenantLLM.tenant_id == current_user.id, TenantLLM.llm_factory == req["llm_factory"], TenantLLM.llm_name == req["llm_name"]], {"status": str(req.get("status", "1"))}
     )
@@ -289,7 +319,7 @@ async def enable_llm():
 @login_required
 @validate_request("llm_factory")
 async def delete_factory():
-    req = await request.json
+    req = await get_request_json()
     TenantLLMService.filter_delete([TenantLLM.tenant_id == current_user.id, TenantLLM.llm_factory == req["llm_factory"]])
     return get_json_result(data=True)
 
@@ -298,6 +328,7 @@ async def delete_factory():
 @login_required
 def my_llms():
     try:
+        TenantLLMService.ensure_mineru_from_env(current_user.id)
         include_details = request.args.get("include_details", "false").lower() == "true"
 
         if include_details:
@@ -345,6 +376,7 @@ def list_app():
     weighted = []
     model_type = request.args.get("model_type")
     try:
+        TenantLLMService.ensure_mineru_from_env(current_user.id)
         objs = TenantLLMService.query(tenant_id=current_user.id)
         facts = set([o.to_dict()["llm_factory"] for o in objs if o.api_key and o.status == StatusEnum.VALID.value])
         status = {(o.llm_name + "@" + o.llm_factory) for o in objs if o.status == StatusEnum.VALID.value}

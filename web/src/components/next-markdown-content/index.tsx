@@ -5,7 +5,6 @@ import { getExtension } from '@/utils/document-util';
 import DOMPurify from 'dompurify';
 import { memo, useCallback, useEffect, useMemo } from 'react';
 import Markdown from 'react-markdown';
-import reactStringReplace from 'react-string-replace';
 import SyntaxHighlighter from 'react-syntax-highlighter';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
@@ -13,23 +12,23 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import { visitParents } from 'unist-util-visit-parents';
 
-import { useFetchDocumentThumbnailsByIds } from '@/hooks/document-hooks';
 import { useTranslation } from 'react-i18next';
 
 import 'katex/dist/katex.min.css'; // `rehype-katex` does not import the CSS for you
 
 import {
+  currentReg,
   preprocessLaTeX,
+  replaceTextByOldReg,
   replaceThinkToSection,
-  showImage,
 } from '@/utils/chat';
 
+import { useFetchDocumentThumbnailsByIds } from '@/hooks/use-document-request';
 import { cn } from '@/lib/utils';
-import { currentReg, replaceTextByOldReg } from '@/pages/chat/utils';
 import classNames from 'classnames';
 import { omit } from 'lodash';
 import { pipe } from 'lodash/fp';
-import { CircleAlert } from 'lucide-react';
+import reactStringReplace from 'react-string-replace';
 import { Button } from '../ui/button';
 import {
   HoverCard,
@@ -213,30 +212,12 @@ function MarkdownContent({
       let replacedText = reactStringReplace(text, currentReg, (match, i) => {
         const chunkIndex = getChunkIndex(match);
 
-        const { documentUrl, fileExtension, imageId, chunkItem, documentId } =
-          getReferenceInfo(chunkIndex);
-
-        const docType = chunkItem?.doc_type;
-
-        return showImage(docType) ? (
-          <Image
-            id={imageId}
-            className={styles.referenceInnerChunkImage}
-            onClick={
-              documentId
-                ? handleDocumentButtonClick(
-                    documentId,
-                    chunkItem,
-                    fileExtension === 'pdf',
-                    documentUrl,
-                  )
-                : () => {}
-            }
-          ></Image>
-        ) : (
+        return (
           <HoverCard key={i}>
             <HoverCardTrigger>
-              <CircleAlert className="size-4 inline-block" />
+              <span className="text-text-secondary bg-bg-card rounded-2xl px-1 mx-1 text-nowrap">
+                Fig. {chunkIndex + 1}
+              </span>
             </HoverCardTrigger>
             <HoverCardContent className="max-w-3xl">
               {renderPopoverContent(chunkIndex)}
@@ -247,7 +228,7 @@ function MarkdownContent({
 
       return replacedText;
     },
-    [renderPopoverContent, getReferenceInfo, handleDocumentButtonClick],
+    [renderPopoverContent],
   );
 
   return (

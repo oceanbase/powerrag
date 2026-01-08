@@ -33,14 +33,13 @@ from sqlalchemy import text, Column, String, Integer, JSON, Double, Row, Table
 from sqlalchemy.dialects.mysql import LONGTEXT, TEXT
 from sqlalchemy.sql.type_api import TypeEngine
 
-from api.utils.configs import get_base_config
 from common import settings
 from common.constants import PAGERANK_FLD, TAG_FLD
 from common.decorator import singleton
 from common.float_utils import get_float
-from rag.nlp import rag_tokenizer
-from rag.utils.doc_store_conn import DocStoreConnection, MatchExpr, OrderByExpr, FusionExpr, MatchTextExpr, \
+from common.doc_store.doc_store_base import DocStoreConnection, MatchExpr, OrderByExpr, FusionExpr, MatchTextExpr, \
     MatchDenseExpr
+from rag.nlp import rag_tokenizer
 
 ATTEMPT_TIME = 2
 OB_QUERY_TIMEOUT = int(os.environ.get("OB_QUERY_TIMEOUT", "100_000_000"))
@@ -319,8 +318,8 @@ def _try_with_lock(lock_name: str, process_func, check_func, timeout: int = None
         timeout = int(os.environ.get("OB_DDL_TIMEOUT", "60"))
 
     if not check_func():
-        from rag.utils.redis_conn import distributed_lock
-        lock = distributed_lock(lock_name)
+        from rag.utils.redis_conn import RedisDistributedLock
+        lock = RedisDistributedLock(lock_name)
         if lock.acquire():
             logger.info(f"acquired lock success: {lock_name}, start processing.")
             try:
@@ -347,7 +346,7 @@ class OBConnection(DocStoreConnection):
         ob_config = settings.OB.get("config", {})
 
         if scheme and scheme.lower() == "mysql":
-            mysql_config = get_base_config("mysql", {})
+            mysql_config = settings.get_base_config("mysql", {})
             logger.info("Use MySQL scheme to create OceanBase connection.")
             host = mysql_config.get("host", "localhost")
             port = mysql_config.get("port", 2881)
@@ -478,15 +477,25 @@ class OBConnection(DocStoreConnection):
             return os.getenv(var, default).lower() in ['true', '1', 'yes', 'y']
 
         self.enable_fulltext_search = is_true('ENABLE_FULLTEXT_SEARCH', 'true')
+        logger.info(f"ENABLE_FULLTEXT_SEARCH={self.enable_fulltext_search}")
+
         self.use_fulltext_hint = is_true('USE_FULLTEXT_HINT', 'true')
+        logger.info(f"USE_FULLTEXT_HINT={self.use_fulltext_hint}")
+
         self.search_original_content = is_true("SEARCH_ORIGINAL_CONTENT", 'true')
+        logger.info(f"SEARCH_ORIGINAL_CONTENT={self.search_original_content}")
+
         self.enable_hybrid_search = is_true('ENABLE_HYBRID_SEARCH', 'false')
+        logger.info(f"ENABLE_HYBRID_SEARCH={self.enable_hybrid_search}")
+
+        self.use_fulltext_first_fusion_search = is_true('USE_FULLTEXT_FIRST_FUSION_SEARCH', 'true')
+        logger.info(f"USE_FULLTEXT_FIRST_FUSION_SEARCH={self.use_fulltext_first_fusion_search}")
 
     """
     Database operations
     """
 
-    def dbType(self) -> str:
+    def db_type(self) -> str:
         return "oceanbase"
 
     def health(self) -> dict:
@@ -542,7 +551,7 @@ class OBConnection(DocStoreConnection):
     Table operations
     """
 
-    def createIdx(self, indexName: str, knowledgebaseId: str, vectorSize: int):
+    def create_idx(self, indexName: str, knowledgebaseId: str, vectorSize: int):
         vector_field_name = f"q_{vectorSize}_vec"
         vector_index_name = f"{vector_field_name}_idx"
 
@@ -593,7 +602,7 @@ class OBConnection(DocStoreConnection):
             # always refresh metadata to make sure it contains the latest table structure
             self.client.refresh_metadata([indexName])
 
-    def deleteIdx(self, indexName: str, knowledgebaseId: str):
+    def delete_idx(self, indexName: str, knowledgebaseId: str):
         if len(knowledgebaseId) > 0:
             # The index need to be alive after any kb deletion since all kb under this tenant are in one index.
             return
@@ -604,7 +613,7 @@ class OBConnection(DocStoreConnection):
         except Exception as e:
             raise Exception(f"OBConnection.deleteIndex error: {str(e)}")
 
-    def indexExist(self, indexName: str, knowledgebaseId: str = None) -> bool:
+    def index_exist(self, indexName: str, knowledgebaseId: str = None) -> bool:
         return self._check_table_exists_cached(indexName)
 
     def _get_count(self, table_name: str, filter_list: list[str] = None) -> int:
@@ -709,19 +718,19 @@ class OBConnection(DocStoreConnection):
     """
 
     def search(
-        self,
-        selectFields: list[str],
-        highlightFields: list[str],
-        condition: dict,
-        matchExprs: list[MatchExpr],
-        orderBy: OrderByExpr,
-        offset: int,
-        limit: int,
-        indexNames: str | list[str],
-        knowledgebaseIds: list[str],
-        aggFields: list[str] = [],
-        rank_feature: dict | None = None,
-        **kwargs,
+            self,
+            selectFields: list[str],
+            highlightFields: list[str],
+            condition: dict,
+            matchExprs: list[MatchExpr],
+            orderBy: OrderByExpr,
+            offset: int,
+            limit: int,
+            indexNames: str | list[str],
+            knowledgebaseIds: list[str],
+            aggFields: list[str] = [],
+            rank_feature: dict | None = None,
+            **kwargs,
     ):
         if isinstance(indexNames, str):
             indexNames = indexNames.split(",")
@@ -951,7 +960,11 @@ class OBConnection(DocStoreConnection):
         if search_type in ["fusion", "fulltext", "vector"] and "_score" not in output_fields:
             output_fields.append("_score")
 
-        group_results = kwargs.get("group_results", False)
+        if limit:
+            if vector_topn is not None:
+                limit = min(vector_topn, limit)
+            if fulltext_topn is not None:
+                limit = min(fulltext_topn, limit)
 
         for index_name in indexNames:
 
@@ -963,29 +976,7 @@ class OBConnection(DocStoreConnection):
             if search_type == "fusion":
                 # fusion search, usually for chat
                 num_candidates = vector_topn + fulltext_topn
-                if group_results:
-                    count_sql = (
-                        f"WITH fulltext_results AS ("
-                        f"  SELECT {fulltext_search_hint} *, {fulltext_search_score_expr} AS relevance"
-                        f"      FROM {index_name}"
-                        f"      WHERE {filters_expr} AND {fulltext_search_filter}"
-                        f"      ORDER BY relevance DESC"
-                        f"      LIMIT {num_candidates}"
-                        f"),"
-                        f" scored_results AS ("
-                        f"  SELECT *"
-                        f"      FROM fulltext_results"
-                        f"      WHERE {vector_search_filter}"
-                        f"),"
-                        f" group_results AS ("
-                        f"  SELECT *, ROW_NUMBER() OVER (PARTITION BY group_id) as rn"
-                        f"      FROM scored_results"
-                        f")"
-                        f"  SELECT COUNT(*)"
-                        f"      FROM group_results"
-                        f"      WHERE rn = 1"
-                    )
-                else:
+                if self.use_fulltext_first_fusion_search:
                     count_sql = (
                         f"WITH fulltext_results AS ("
                         f"  SELECT {fulltext_search_hint} *, {fulltext_search_score_expr} AS relevance"
@@ -995,6 +986,22 @@ class OBConnection(DocStoreConnection):
                         f"      LIMIT {num_candidates}"
                         f")"
                         f"  SELECT COUNT(*) FROM fulltext_results WHERE {vector_search_filter}"
+                    )
+                else:
+                    count_sql = (
+                        f"WITH fulltext_results AS ("
+                        f"  SELECT {fulltext_search_hint} id FROM {index_name}"
+                        f"      WHERE {filters_expr} AND {fulltext_search_filter}"
+                        f"      ORDER BY {fulltext_search_score_expr}"
+                        f"      LIMIT {fulltext_topn}"
+                        f"),"
+                        f"vector_results AS ("
+                        f"  SELECT id FROM {index_name}"
+                        f"      WHERE {filters_expr} AND {vector_search_filter}"
+                        f"      ORDER BY {vector_search_expr}"
+                        f"      APPROXIMATE LIMIT {vector_topn}"
+                        f")"
+                        f"  SELECT COUNT(*) FROM fulltext_results f FULL OUTER JOIN vector_results v ON f.id = v.id"
                     )
                 logger.debug("OBConnection.search with count sql: %s", count_sql)
 
@@ -1017,32 +1024,8 @@ class OBConnection(DocStoreConnection):
                 if total_count == 0:
                     continue
 
-                score_expr = f"(relevance * {1 - vector_similarity_weight} + {vector_search_score_expr} * {vector_similarity_weight} + {pagerank_score_expr})"
-                if group_results:
-                    fusion_sql = (
-                        f"WITH fulltext_results AS ("
-                        f"  SELECT {fulltext_search_hint} *, {fulltext_search_score_expr} AS relevance"
-                        f"      FROM {index_name}"
-                        f"      WHERE {filters_expr} AND {fulltext_search_filter}"
-                        f"      ORDER BY relevance DESC"
-                        f"      LIMIT {num_candidates}"
-                        f"),"
-                        f" scored_results AS ("
-                        f"  SELECT *, {score_expr} AS _score"
-                        f"      FROM fulltext_results"
-                        f"      WHERE {vector_search_filter}"
-                        f"),"
-                        f" group_results AS ("
-                        f"  SELECT *, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY _score DESC) as rn"
-                        f"      FROM scored_results"
-                        f")"
-                        f"  SELECT {fields_expr}, _score"
-                        f"      FROM group_results"
-                        f"      WHERE rn = 1"
-                        f"      ORDER BY _score DESC"
-                        f"      LIMIT {offset}, {limit}"
-                    )
-                else:
+                if self.use_fulltext_first_fusion_search:
+                    score_expr = f"(relevance * {1 - vector_similarity_weight} + {vector_search_score_expr} * {vector_similarity_weight} + {pagerank_score_expr})"
                     fusion_sql = (
                         f"WITH fulltext_results AS ("
                         f"  SELECT {fulltext_search_hint} *, {fulltext_search_score_expr} AS relevance"
@@ -1055,6 +1038,38 @@ class OBConnection(DocStoreConnection):
                         f"      FROM fulltext_results"
                         f"      WHERE {vector_search_filter}"
                         f"      ORDER BY _score DESC"
+                        f"      LIMIT {offset}, {limit}"
+                    )
+                else:
+                    pagerank_score_expr = f"(CAST(IFNULL(f.{PAGERANK_FLD}, 0) AS DECIMAL(10, 2)) / 100)"
+                    score_expr = f"(f.relevance * {1 - vector_similarity_weight} + v.similarity * {vector_similarity_weight} + {pagerank_score_expr})"
+                    fields_expr = ", ".join([f"t.{f} as {f}" for f in output_fields if f != "_score"])
+                    fusion_sql = (
+                        f"WITH fulltext_results AS ("
+                        f"  SELECT {fulltext_search_hint} id, pagerank_fea, {fulltext_search_score_expr} AS relevance"
+                        f"      FROM {index_name}"
+                        f"      WHERE {filters_expr} AND {fulltext_search_filter}"
+                        f"      ORDER BY relevance DESC"
+                        f"      LIMIT {fulltext_topn}"
+                        f"),"
+                        f"vector_results AS ("
+                        f"  SELECT id, pagerank_fea, {vector_search_score_expr} AS similarity"
+                        f"      FROM {index_name}"
+                        f"      WHERE {filters_expr} AND {vector_search_filter}"
+                        f"      ORDER BY {vector_search_expr}"
+                        f"      APPROXIMATE LIMIT {vector_topn}"
+                        f"),"
+                        f"combined_results AS ("
+                        f"  SELECT COALESCE(f.id, v.id) AS id, {score_expr} AS score"
+                        f"      FROM fulltext_results f"
+                        f"      FULL OUTER JOIN vector_results v"
+                        f"      ON f.id = v.id"
+                        f")"
+                        f"  SELECT {fields_expr}, c.score as _score"
+                        f"      FROM combined_results c"
+                        f"      JOIN {index_name} t"
+                        f"      ON c.id = t.id"
+                        f"      ORDER BY score DESC"
                         f"      LIMIT {offset}, {limit}"
                     )
                 logger.debug("OBConnection.search with fusion sql: %s", fusion_sql)
@@ -1275,6 +1290,10 @@ class OBConnection(DocStoreConnection):
 
                 for row in rows:
                     result.chunks.append(self._row_to_entity(row, output_fields))
+
+        if result.total == 0:
+            result.total = len(result.chunks)
+
         return result
 
     def get(self, chunkId: str, indexName: str, knowledgebaseIds: list[str]) -> dict | None:
@@ -1469,7 +1488,7 @@ class OBConnection(DocStoreConnection):
     def get_total(self, res) -> int:
         return res.total
 
-    def get_chunk_ids(self, res) -> list[str]:
+    def get_doc_ids(self, res) -> list[str]:
         return [row["id"] for row in res.chunks]
 
     def get_fields(self, res, fields: list[str]) -> dict[str, dict]:
@@ -1516,7 +1535,7 @@ class OBConnection(DocStoreConnection):
                     flags=re.IGNORECASE | re.MULTILINE,
                 )
             if len(re.findall(r'</em><em>', highlighted_txt)) > 0 or len(
-                re.findall(r'</em>\s*<em>', highlighted_txt)) > 0:
+                    re.findall(r'</em>\s*<em>', highlighted_txt)) > 0:
                 return highlighted_txt
             else:
                 return None
@@ -1535,9 +1554,9 @@ class OBConnection(DocStoreConnection):
             if token_pos != -1:
                 if token in keywords:
                     highlighted_txt = (
-                        highlighted_txt[:token_pos] +
-                        f'<em>{token}</em>' +
-                        highlighted_txt[token_pos + len(token):]
+                            highlighted_txt[:token_pos] +
+                            f'<em>{token}</em>' +
+                            highlighted_txt[token_pos + len(token):]
                     )
                 last_pos = token_pos
         return re.sub(r'</em><em>', '', highlighted_txt)

@@ -21,8 +21,9 @@ import re
 import secrets
 import time
 from datetime import datetime
+import base64
 
-from quart import redirect, request, session, make_response
+from quart import make_response, redirect, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from api.apps.auth import get_auth_client
@@ -39,12 +40,13 @@ from common.connection_utils import construct_response
 from api.utils.api_utils import (
     get_data_error_result,
     get_json_result,
+    get_request_json,
     server_error_response,
     validate_request,
 )
 from api.utils.crypt import decrypt
 from rag.utils.redis_conn import REDIS_CONN
-from api.apps import smtp_mail_server, login_required, current_user, login_user, logout_user
+from api.apps import login_required, current_user, login_user, logout_user
 from api.utils.web_utils import (
     send_email_html,
     OTP_LENGTH,
@@ -57,6 +59,7 @@ from api.utils.web_utils import (
     captcha_key,
 )
 from common import settings
+from common.http_client import async_request
 
 
 @manager.route("/login", methods=["POST", "GET"])  # noqa: F821
@@ -90,11 +93,14 @@ async def login():
         schema:
           type: object
     """
-    json_body = await request.json
+    json_body = await get_request_json()
     if not json_body:
         return get_json_result(data=False, code=RetCode.AUTHENTICATION_ERROR, message="Unauthorized!")
 
     email = json_body.get("email", "")
+    if email == "admin@ragflow.io":
+        return get_json_result(data=False, code=RetCode.AUTHENTICATION_ERROR, message="Default admin account cannot be used to login normal services!")
+    
     users = UserService.query(email=email)
     if not users:
         return get_json_result(
@@ -121,8 +127,8 @@ async def login():
         response_data = user.to_json()
         user.access_token = get_uuid()
         login_user(user)
-        user.update_time = (current_timestamp(),)
-        user.update_date = (datetime_format(datetime.now()),)
+        user.update_time = current_timestamp()
+        user.update_date = datetime_format(datetime.now())
         user.save()
         msg = "Welcome back!"
 
@@ -136,7 +142,7 @@ async def login():
 
 
 @manager.route("/login/channels", methods=["GET"])  # noqa: F821
-def get_login_channels():
+async def get_login_channels():
     """
     Get all supported authentication channels.
     """
@@ -157,7 +163,7 @@ def get_login_channels():
 
 
 @manager.route("/login/<channel>", methods=["GET"])  # noqa: F821
-def oauth_login(channel):
+async def oauth_login(channel):
     channel_config = settings.OAUTH_CONFIG.get(channel)
     if not channel_config:
         raise ValueError(f"Invalid channel name: {channel}")
@@ -170,7 +176,7 @@ def oauth_login(channel):
 
 
 @manager.route("/oauth/callback/<channel>", methods=["GET"])  # noqa: F821
-def oauth_callback(channel):
+async def oauth_callback(channel):
     """
     Handle the OAuth/OIDC callback for various channels dynamically.
     """
@@ -192,7 +198,10 @@ def oauth_callback(channel):
             return redirect("/?error=missing_code")
 
         # Exchange authorization code for access token
-        token_info = auth_cli.exchange_code_for_token(code)
+        if hasattr(auth_cli, "async_exchange_code_for_token"):
+            token_info = await auth_cli.async_exchange_code_for_token(code)
+        else:
+            token_info = auth_cli.exchange_code_for_token(code)
         access_token = token_info.get("access_token")
         if not access_token:
             return redirect("/?error=token_failed")
@@ -200,7 +209,10 @@ def oauth_callback(channel):
         id_token = token_info.get("id_token")
 
         # Fetch user info
-        user_info = auth_cli.fetch_user_info(access_token, id_token=id_token)
+        if hasattr(auth_cli, "async_fetch_user_info"):
+            user_info = await auth_cli.async_fetch_user_info(access_token, id_token=id_token)
+        else:
+            user_info = auth_cli.fetch_user_info(access_token, id_token=id_token)
         if not user_info.email:
             return redirect("/?error=email_missing")
 
@@ -259,7 +271,7 @@ def oauth_callback(channel):
 
 
 @manager.route("/github_callback", methods=["GET"])  # noqa: F821
-def github_callback():
+async def github_callback():
     """
     **Deprecated**, Use `/oauth/callback/<channel>` instead.
 
@@ -279,9 +291,8 @@ def github_callback():
         schema:
           type: object
     """
-    import requests
-
-    res = requests.post(
+    res = await async_request(
+        "POST",
         settings.GITHUB_OAUTH.get("url"),
         data={
             "client_id": settings.GITHUB_OAUTH.get("client_id"),
@@ -299,7 +310,7 @@ def github_callback():
 
     session["access_token"] = res["access_token"]
     session["access_token_from"] = "github"
-    user_info = user_info_from_github(session["access_token"])
+    user_info = await user_info_from_github(session["access_token"])
     email_address = user_info["email"]
     users = UserService.query(email=email_address)
     user_id = get_uuid()
@@ -348,7 +359,7 @@ def github_callback():
 
 
 @manager.route("/feishu_callback", methods=["GET"])  # noqa: F821
-def feishu_callback():
+async def feishu_callback():
     """
     Feishu OAuth callback endpoint.
     ---
@@ -366,9 +377,8 @@ def feishu_callback():
         schema:
           type: object
     """
-    import requests
-
-    app_access_token_res = requests.post(
+    app_access_token_res = await async_request(
+        "POST",
         settings.FEISHU_OAUTH.get("app_access_token_url"),
         data=json.dumps(
             {
@@ -382,7 +392,8 @@ def feishu_callback():
     if app_access_token_res["code"] != 0:
         return redirect("/?error=%s" % app_access_token_res)
 
-    res = requests.post(
+    res = await async_request(
+        "POST",
         settings.FEISHU_OAUTH.get("user_access_token_url"),
         data=json.dumps(
             {
@@ -403,7 +414,7 @@ def feishu_callback():
         return redirect("/?error=contact:user.email:readonly not in scope")
     session["access_token"] = res["data"]["access_token"]
     session["access_token_from"] = "feishu"
-    user_info = user_info_from_feishu(session["access_token"])
+    user_info = await user_info_from_feishu(session["access_token"])
     email_address = user_info["email"]
     users = UserService.query(email=email_address)
     user_id = get_uuid()
@@ -451,36 +462,34 @@ def feishu_callback():
     return redirect("/?auth=%s" % user.get_id())
 
 
-def user_info_from_feishu(access_token):
-    import requests
-
+async def user_info_from_feishu(access_token):
     headers = {
         "Content-Type": "application/json; charset=utf-8",
         "Authorization": f"Bearer {access_token}",
     }
-    res = requests.get("https://open.feishu.cn/open-apis/authen/v1/user_info", headers=headers)
+    res = await async_request("GET", "https://open.feishu.cn/open-apis/authen/v1/user_info", headers=headers)
     user_info = res.json()["data"]
     user_info["email"] = None if user_info.get("email") == "" else user_info["email"]
     return user_info
 
 
-def user_info_from_github(access_token):
-    import requests
-
+async def user_info_from_github(access_token):
     headers = {"Accept": "application/json", "Authorization": f"token {access_token}"}
-    res = requests.get(f"https://api.github.com/user?access_token={access_token}", headers=headers)
+    res = await async_request("GET", f"https://api.github.com/user?access_token={access_token}", headers=headers)
     user_info = res.json()
-    email_info = requests.get(
+    email_info_response = await async_request(
+        "GET",
         f"https://api.github.com/user/emails?access_token={access_token}",
         headers=headers,
-    ).json()
+    )
+    email_info = email_info_response.json()
     user_info["email"] = next((email for email in email_info if email["primary"]), None)["email"]
     return user_info
 
 
 @manager.route("/logout", methods=["GET"])  # noqa: F821
 @login_required
-def log_out():
+async def log_out():
     """
     User logout endpoint.
     ---
@@ -531,7 +540,7 @@ async def setting_user():
           type: object
     """
     update_dict = {}
-    request_data = await request.json
+    request_data = await get_request_json()
     if request_data.get("password"):
         new_password = request_data.get("new_password")
         if not check_password_hash(current_user.password, decrypt(request_data["password"])):
@@ -570,7 +579,7 @@ async def setting_user():
 
 @manager.route("/info", methods=["GET"])  # noqa: F821
 @login_required
-def user_profile():
+async def user_profile():
     """
     Get user profile information.
     ---
@@ -651,7 +660,7 @@ def user_register(user_id, user):
     tenant_llm = get_init_tenant_llm(user_id)
 
     if not UserService.save(**user):
-        return
+        return None
     TenantService.insert(**tenant)
     UserTenantService.insert(**usr_tenant)
     TenantLLMService.insert_many(tenant_llm)
@@ -698,7 +707,7 @@ async def user_add():
             code=RetCode.OPERATING_ERROR,
         )
 
-    req = await request.json
+    req = await get_request_json()
     email_address = req["email"]
 
     # Validate the email address
@@ -755,7 +764,7 @@ async def user_add():
 
 @manager.route("/tenant_info", methods=["GET"])  # noqa: F821
 @login_required
-def tenant_info():
+async def tenant_info():
     """
     Get tenant information.
     ---
@@ -831,14 +840,14 @@ async def set_tenant_info():
         schema:
           type: object
     """
-    req = await request.json
+    req = await get_request_json()
     try:
         tid = req.pop("tenant_id")
         TenantService.update_by_id(tid, req)
         return get_json_result(data=True)
     except Exception as e:
         return server_error_response(e)
-        
+
 
 @manager.route("/forget/captcha", methods=["GET"])  # noqa: F821
 async def forget_get_captcha():
@@ -875,7 +884,7 @@ async def forget_send_otp():
     - Verify the image captcha stored at captcha:{email} (case-insensitive).
     - On success, generate an email OTP (A–Z with length = OTP_LENGTH), store hash + salt (and timestamp) in Redis with TTL, reset attempts and cooldown, and send the OTP via email.
     """
-    req = await request.get_json()
+    req = await get_request_json()
     email = req.get("email") or ""
     captcha = (req.get("captcha") or "").strip()
 
@@ -918,47 +927,45 @@ async def forget_send_otp():
 
     ttl_min = OTP_TTL_SECONDS // 60
 
-    if not smtp_mail_server:
-        logging.warning("SMTP mail server not initialized; skip sending email.")
-    else:
-        try:
-            send_email_html(
-                subject="Your Password Reset Code",
-                to_email=email,
-                template_key="reset_code",
-                code=otp,
-                ttl_min=ttl_min,
-            )
-        except Exception:
-            return get_json_result(data=False, code=RetCode.SERVER_ERROR, message="failed to send email")
-        
+    try:
+        await send_email_html(
+            subject="Your Password Reset Code",
+            to_email=email,
+            template_key="reset_code",
+            code=otp,
+            ttl_min=ttl_min,
+        )
+
+    except Exception as e:
+        logging.exception(e)
+        return get_json_result(data=False, code=RetCode.SERVER_ERROR, message="failed to send email")
+
     return get_json_result(data=True, code=RetCode.SUCCESS, message="verification passed, email sent")
 
 
-@manager.route("/forget", methods=["POST"])  # noqa: F821
-async def forget():
+def _verified_key(email: str) -> str:
+    return f"otp:verified:{email}"
+
+
+@manager.route("/forget/verify-otp", methods=["POST"])  # noqa: F821
+async def forget_verify_otp():
     """
-    POST: Verify email + OTP and reset password, then log the user in.
-    Request JSON: { email, otp, new_password, confirm_new_password }
+    Verify email + OTP only. On success:
+    - consume the OTP and attempt counters
+    - set a short-lived verified flag in Redis for the email
+    Request JSON: { email, otp }
     """
-    req = await request.get_json()
+    req = await get_request_json()
     email = req.get("email") or ""
     otp = (req.get("otp") or "").strip()
-    new_pwd = req.get("new_password")
-    new_pwd2 = req.get("confirm_new_password")
 
-    if not all([email, otp, new_pwd, new_pwd2]):
-        return get_json_result(data=False, code=RetCode.ARGUMENT_ERROR, message="email, otp and passwords are required")
-
-    # For reset, passwords are provided as-is (no decrypt needed)
-    if new_pwd != new_pwd2:
-        return get_json_result(data=False, code=RetCode.ARGUMENT_ERROR, message="passwords do not match")
+    if not all([email, otp]):
+        return get_json_result(data=False, code=RetCode.ARGUMENT_ERROR, message="email and otp are required")
 
     users = UserService.query(email=email)
     if not users:
         return get_json_result(data=False, code=RetCode.DATA_ERROR, message="invalid email")
 
-    user = users[0]
     # Verify OTP from Redis
     k_code, k_attempts, k_last, k_lock = otp_keys(email)
     if REDIS_CONN.get(k_lock):
@@ -974,7 +981,6 @@ async def forget():
     except Exception:
         return get_json_result(data=False, code=RetCode.EXCEPTION_ERROR, message="otp storage corrupted")
 
-    # Case-insensitive verification: OTP generated uppercase
     calc = hash_code(otp.upper(), salt)
     if calc != stored_hash:
         # bump attempts
@@ -987,23 +993,70 @@ async def forget():
             REDIS_CONN.set(k_lock, int(time.time()), ATTEMPT_LOCK_SECONDS)
         return get_json_result(data=False, code=RetCode.AUTHENTICATION_ERROR, message="expired otp")
 
-    # Success: consume OTP and reset password
+    # Success: consume OTP and attempts; mark verified
     REDIS_CONN.delete(k_code)
     REDIS_CONN.delete(k_attempts)
     REDIS_CONN.delete(k_last)
     REDIS_CONN.delete(k_lock)
 
+    # set verified flag with limited TTL, reuse OTP_TTL_SECONDS or smaller window
     try:
-        UserService.update_user_password(user.id, new_pwd)
+        REDIS_CONN.set(_verified_key(email), "1", OTP_TTL_SECONDS)
+    except Exception:
+        return get_json_result(data=False, code=RetCode.SERVER_ERROR, message="failed to set verification state")
+
+    return get_json_result(data=True, code=RetCode.SUCCESS, message="otp verified")
+
+
+@manager.route("/forget/reset-password", methods=["POST"])  # noqa: F821
+async def forget_reset_password():
+    """
+    Reset password after successful OTP verification.
+    Requires: { email, new_password, confirm_new_password }
+    Steps:
+    - check verified flag in Redis
+    - update user password
+    - auto login
+    - clear verified flag
+    """
+    
+    req = await get_request_json()
+    email = req.get("email") or ""
+    new_pwd = req.get("new_password")
+    new_pwd2 = req.get("confirm_new_password")
+
+    new_pwd_base64 = decrypt(new_pwd)
+    new_pwd_string = base64.b64decode(new_pwd_base64).decode('utf-8')
+    new_pwd2_string = base64.b64decode(decrypt(new_pwd2)).decode('utf-8')
+
+    REDIS_CONN.get(_verified_key(email))
+    if not REDIS_CONN.get(_verified_key(email)):
+        return get_json_result(data=False, code=RetCode.AUTHENTICATION_ERROR, message="email not verified")
+
+    if not all([email, new_pwd, new_pwd2]):
+        return get_json_result(data=False, code=RetCode.ARGUMENT_ERROR, message="email and passwords are required")
+
+    if new_pwd_string != new_pwd2_string:
+        return get_json_result(data=False, code=RetCode.ARGUMENT_ERROR, message="passwords do not match")
+
+    users = UserService.query_user_by_email(email=email)
+    if not users:
+        return get_json_result(data=False, code=RetCode.DATA_ERROR, message="invalid email")
+    
+    user = users[0]
+    try:
+        UserService.update_user_password(user.id, new_pwd_base64)
     except Exception as e:
         logging.exception(e)
         return get_json_result(data=False, code=RetCode.EXCEPTION_ERROR, message="failed to reset password")
 
-    # Auto login (reuse login flow)
-    user.access_token = get_uuid()
-    login_user(user)
-    user.update_time = (current_timestamp(),)
-    user.update_date = (datetime_format(datetime.now()),)
-    user.save()
+    # clear verified flag
+    try:
+        REDIS_CONN.delete(_verified_key(email))
+    except Exception:
+        pass
+
     msg = "Password reset successful. Logged in."
-    return construct_response(data=user.to_json(), auth=user.get_id(), message=msg)
+    return await construct_response(data=user.to_json(), auth=user.get_id(), message=msg)
+
+

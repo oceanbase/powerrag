@@ -20,13 +20,16 @@ import re
 
 from common.constants import ParserType
 from io import BytesIO
-from rag.nlp import rag_tokenizer, tokenize, tokenize_table, bullets_category, title_frequency, tokenize_chunks, docx_question_level
+from rag.nlp import rag_tokenizer, tokenize, tokenize_table, bullets_category, title_frequency, tokenize_chunks, \
+    docx_question_level, attach_media_context
 from common.token_utils import num_tokens_from_string
 from deepdoc.parser import PdfParser, DocxParser
-from deepdoc.parser.figure_parser import vision_figure_parser_pdf_wrapper,vision_figure_parser_docx_wrapper
+from deepdoc.parser.figure_parser import vision_figure_parser_pdf_wrapper, vision_figure_parser_docx_wrapper
 from docx import Document
 from PIL import Image
 from rag.app.naive import by_plaintext, PARSERS
+from common.parser_config_utils import normalize_layout_recognizer
+
 
 class Pdf(PdfParser):
     def __init__(self):
@@ -128,11 +131,11 @@ class Docx(DocxParser):
             question_level, p_text = 0, ''
             if from_page <= pn < to_page and p.text.strip():
                 question_level, p_text = docx_question_level(p)
-            if not question_level or question_level > 6: # not a question
+            if not question_level or question_level > 6:  # not a question
                 last_answer = f'{last_answer}\n{p_text}'
                 current_image = self.get_picture(self.doc, p)
                 last_image = self.concat_img(last_image, current_image)
-            else:   # is a question
+            else:  # is a question
                 if last_answer or last_image:
                     sum_question = '\n'.join(question_stack)
                     if sum_question:
@@ -155,17 +158,17 @@ class Docx(DocxParser):
             sum_question = '\n'.join(question_stack)
             if sum_question:
                 ti_list.append((f'{sum_question}\n{last_answer}', last_image))
-                
+
         tbls = []
         for tb in self.doc.tables:
-            html= "<table>"
+            html = "<table>"
             for r in tb.rows:
                 html += "<tr>"
                 i = 0
                 while i < len(r.cells):
                     span = 1
                     c = r.cells[i]
-                    for j in range(i+1, len(r.cells)):
+                    for j in range(i + 1, len(r.cells)):
                         if c.text == r.cells[j].text:
                             span += 1
                             i = j
@@ -196,7 +199,9 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
     # is it English
     eng = lang.lower() == "english"  # pdf_parser.is_english
     if re.search(r"\.pdf$", filename, re.IGNORECASE):
-        layout_recognizer = parser_config.get("layout_recognize", "DeepDOC")
+        layout_recognizer, parser_model_name = normalize_layout_recognizer(
+            parser_config.get("layout_recognize", "DeepDOC")
+        )
 
         if isinstance(layout_recognizer, bool):
             layout_recognizer = "DeepDOC" if layout_recognizer else "Plain Text"
@@ -205,14 +210,19 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
         pdf_parser = PARSERS.get(name, by_plaintext)
         callback(0.1, "Start to parse.")
 
+        kwargs.pop("parse_method", None)
+        kwargs.pop("mineru_llm_name", None)
         sections, tbls, pdf_parser = pdf_parser(
-            filename = filename,
-            binary = binary,
-            from_page = from_page,
-            to_page = to_page,
-            lang = lang,
-            callback = callback,
-            pdf_cls = Pdf,
+            filename=filename,
+            binary=binary,
+            from_page=from_page,
+            to_page=to_page,
+            lang=lang,
+            callback=callback,
+            pdf_cls=Pdf,
+            layout_recognizer=layout_recognizer,
+            mineru_llm_name=parser_model_name,
+            parse_method="manual",
             **kwargs
         )
 
@@ -225,18 +235,17 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
             elif len(section) != 3:
                 raise ValueError(f"Unexpected section length: {len(section)} (value={section!r})")
 
-            txt, sec_id, poss = section
+            txt, layoutno, poss = section
             if isinstance(poss, str):
                 poss = pdf_parser.extract_positions(poss)
-                first = poss[0]          # tuple: ([pn], x1, x2, y1, y2)
-                pn = first[0]           
+                if poss:
+                    first = poss[0]  # tuple: ([pn], x1, x2, y1, y2)
+                    pn = first[0]
+                    if isinstance(pn, list) and pn:
+                        pn = pn[0]  # [pn] -> pn
+                        poss[0] = (pn, *first[1:])
 
-                if isinstance(pn, list):
-                    pn = pn[0]           # [pn] -> pn
-                    poss[0] = (pn, *first[1:])
-
-            return (txt, sec_id, poss)
-        
+            return (txt, layoutno, poss)
 
         sections = [_normalize_section(sec) for sec in sections]
 
@@ -245,7 +254,7 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
 
         if name in ["tcadp", "docling", "mineru"]:
             parser_config["chunk_token_num"] = 0
-        
+
         callback(0.8, "Finish parsing.")
 
         if len(sections) > 0 and len(pdf_parser.outlines) / len(sections) > 0.03:
@@ -282,7 +291,7 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
             if not rows:
                 continue
             sections.append((rows if isinstance(rows, str) else rows[0], -1,
-                            [(p[0] + 1 - from_page, p[1], p[2], p[3], p[4]) for p in poss]))
+                             [(p[0] + 1 - from_page, p[1], p[2], p[3], p[4]) for p in poss]))
 
         def tag(pn, left, right, top, bottom):
             if pn + left + right + top + bottom == 0:
@@ -305,16 +314,20 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
             tk_cnt = num_tokens_from_string(txt)
             if sec_id > -1:
                 last_sid = sec_id
-        tbls=vision_figure_parser_pdf_wrapper(tbls=tbls,callback=callback,**kwargs)
+        tbls = vision_figure_parser_pdf_wrapper(tbls=tbls, callback=callback, **kwargs)
         res = tokenize_table(tbls, doc, eng)
         res.extend(tokenize_chunks(chunks, doc, eng, pdf_parser))
+        table_ctx = max(0, int(parser_config.get("table_context_size", 0) or 0))
+        image_ctx = max(0, int(parser_config.get("image_context_size", 0) or 0))
+        if table_ctx or image_ctx:
+            attach_media_context(res, table_ctx, image_ctx)
         return res
 
     elif re.search(r"\.docx?$", filename, re.IGNORECASE):
         docx_parser = Docx()
         ti_list, tbls = docx_parser(filename, binary,
                                     from_page=0, to_page=10000, callback=callback)
-        tbls=vision_figure_parser_docx_wrapper(sections=ti_list,tbls=tbls,callback=callback,**kwargs)
+        tbls = vision_figure_parser_docx_wrapper(sections=ti_list, tbls=tbls, callback=callback, **kwargs)
         res = tokenize_table(tbls, doc, eng)
         for text, image in ti_list:
             d = copy.deepcopy(doc)
@@ -323,10 +336,14 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
                 d["doc_type_kwd"] = "image"
             tokenize(d, text, eng)
             res.append(d)
+        table_ctx = max(0, int(parser_config.get("table_context_size", 0) or 0))
+        image_ctx = max(0, int(parser_config.get("image_context_size", 0) or 0))
+        if table_ctx or image_ctx:
+            attach_media_context(res, table_ctx, image_ctx)
         return res
     else:
         raise NotImplementedError("file type not supported yet(pdf and docx supported)")
-    
+
 
 if __name__ == "__main__":
     import sys
