@@ -779,5 +779,5 @@ class InfinityConnection(DocStoreConnection):
     SQL
     """
 
-    def sql(sql: str, fetch_size: int, format: str):
+    def sql(self, sql: str, fetch_size: int, format: str):
         raise NotImplementedError("Not implemented")
