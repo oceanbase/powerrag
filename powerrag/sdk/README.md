@@ -8,37 +8,17 @@ PowerRAG SDK 是一个功能强大的 Python SDK，为 PowerRAG API 提供了简
 ## 特性
 
 - 🚀 **简单易用**: 面向对象的 API 设计，直观的方法调用
-- 📚 **完整功能**: 支持 PowerRAG 所有核心功能模块
+- 📚 **完整功能**: 支持 PowerRAG 所有核心功能模块，包括文档上传/解析/切片/提取/Raptor构建/知识库graph构建
 - 🔄 **异步支持**: 支持异步任务的状态查询和轮询等待
 - 📦 **批量操作**: 支持批量上传、删除、抽取等操作
 - 📝 **Markdown 解析**: 支持文档解析为 Markdown 格式（同步/异步）
-- 🎯 **类型提示**: 完整的类型注解，IDE 友好
-- ✅ **全面测试**: 包含完整的测试用例
 
 ## 安装
 
-### 方式 1: 使用 pip（推荐）
+### 使用 pip
 
 ```bash
 pip install powerrag-sdk
-```
-
-### 方式 2: 从源码安装
-
-```bash
-git clone https://github.com/oceanbase/powerrag.git
-cd powerrag
-pip install -e .
-```
-
-### 方式 3: 仅安装 SDK 模块
-
-如果你只需要 SDK 功能：
-
-```bash
-git clone https://github.com/oceanbase/powerrag.git
-cd powerrag/powerrag/sdk
-pip install -e .
 ```
 
 ### 依赖要求
