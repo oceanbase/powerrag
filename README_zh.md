@@ -42,7 +42,7 @@ PowerRAG 在 RAGFlow 的文档处理能力之上，新增多引擎与多模式�
 
 - **多引擎 OCR 支持**: 集成 MinerU 和 Dots.OCR，支持复杂文档的识别与文本抽取
 - **多种切片策略**: 支持基于标题、正则表达式及智能切片算法的分片方式，提升内容组织与检索效率
-- **结构化信息提取**: 基于 [LangExtract](https://github.com/langextract/langextract) 实现结构化信息识别与抽取，支持从文档中提取表格、字段、实体等结构化内容，为知识图谱与语义检索提供数据基础
+- **结构化信息提取**: 基于 [LangExtract](https://github.com/google/langextract) 实现结构化信息识别与抽取，支持从文档中提取表格、字段、实体等结构化内容，为知识图谱与语义检索提供数据基础
 
 ### 混合检索
 
