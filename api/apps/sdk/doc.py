@@ -39,6 +39,7 @@ from api.db.services.task_service import TaskService, queue_tasks, queue_tasks_b
 from api.db.services.dialog_service import meta_filter, convert_conditions
 from api.utils.api_utils import check_duplicate_ids, construct_json_result, get_error_data_result, get_parser_config, get_result, server_error_response, token_required, \
     request_json
+from api.utils.file_utils import filename_type
 from rag.app.qa import beAdoc, rmPrefix
 from rag.app.tag import label_question
 from rag.nlp import rag_tokenizer, search
@@ -198,13 +199,18 @@ async def upload_with_meta(dataset_id, tenant_id):
     parse = req.get("parse", True)
 
     group_id_field = req.get("group_id_field")
-    file_extension = req.get("file_extension", "html")
+    file_extension = (req.get("file_extension", "html") or "html").lstrip(".")
 
     file_objs = []
     for doc in docs:
         title = doc["title"]
         file_obj = io.BytesIO(doc["content"].encode("utf-8"))
-        file_obj.filename = f"{title}.{file_extension}"
+        # `title` may contain dots (e.g., version numbers like "Windows 1.0") which are NOT file extensions.
+        # Determine whether it's a supported file type; if not, append `file_extension` so the backend parser can work.
+        filename = title
+        if filename_type(filename) == FileType.OTHER.value:
+            filename = f"{title}.{file_extension}"
+        file_obj.filename = filename
         metadata = doc.get("metadata", {})
         if not metadata.get("_group_id") and group_id_field and group_id_field in metadata:
             metadata["_group_id"] = metadata[group_id_field]
