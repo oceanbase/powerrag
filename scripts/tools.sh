@@ -19,6 +19,13 @@ mkdir -p "${LOG_DIR}"
 PID_DIR="${WORKSPACE_FOLDER}/pids"
 mkdir -p "${PID_DIR}"
 
+# Ensure runtime exists
+if [ ! -x "${PYTHON}" ]; then
+    echo "[tools][ERROR] Python venv not found: ${PYTHON}" >&2
+    echo "[tools][ERROR] Please run: ${WORKSPACE_FOLDER}/scripts/setup_tools_venv.sh" >&2
+    exit 1
+fi
+
 # 上传 Wiki JSON 数据
 upload_wiki_json() {
     local pid_file="${PID_DIR}/upload_wiki_json.pid"

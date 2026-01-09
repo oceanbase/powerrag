@@ -14,15 +14,17 @@
 #  limitations under the License.
 #
 import logging
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from peewee import fn
 
+from api.constants import FILE_NAME_LEN_LIMIT
 from api.db import KNOWLEDGEBASE_FOLDER_NAME, FileType
 from api.db.db_models import DB, Document, File, File2Document, Knowledgebase, Task
-from api.db.services import duplicate_name
+from api.db.db_utils import bulk_insert_into_db
 from api.db.services.common_service import CommonService
 from api.db.services.document_service import DocumentService
 from api.db.services.file2document_service import File2DocumentService
@@ -395,9 +397,10 @@ class FileService(CommonService):
 
     @classmethod
     @DB.connection_context()
-    def add_file_from_kb(cls, doc, kb_folder_id, tenant_id):
-        for _ in File2DocumentService.get_by_document_id(doc["id"]):
-            return
+    def add_file_from_kb(cls, doc, kb_folder_id, tenant_id, skip_if_linked: bool = True):
+        if skip_if_linked:
+            for _ in File2DocumentService.get_by_document_id(doc["id"]):
+                return
         file = {
             "id": get_uuid(),
             "parent_id": kb_folder_id,
@@ -411,6 +414,58 @@ class FileService(CommonService):
         }
         cls.save(**file)
         File2DocumentService.save(**{"id": get_uuid(), "file_id": file["id"], "document_id": doc["id"]})
+
+    @staticmethod
+    def _split_name_counter(filename_stem: str) -> tuple[str, int | None]:
+        """
+        Split a filename stem into (main_part, counter) where counter is detected from '(n)' suffix.
+        Example: 'doc(2)' -> ('doc', 2); 'doc' -> ('doc', None)
+        """
+        pattern = re.compile(r"^(.*?)\((\d+)\)$")
+        match = pattern.search(filename_stem)
+        if match:
+            main_part = match.group(1).rstrip()
+            bracket_part = match.group(2)
+            return main_part, int(bracket_part)
+        return filename_stem, None
+
+    @classmethod
+    def _dedupe_name_in_memory(cls, original_name: str, used_names: set[str]) -> str:
+        """
+        Generate a unique name within `used_names` by appending/incrementing '(n)' before suffix.
+        Behavior aligns with `duplicate_name()` but avoids per-file DB queries.
+        """
+        if original_name not in used_names:
+            used_names.add(original_name)
+            return original_name
+
+        path = Path(original_name)
+        stem = path.stem
+        suffix = path.suffix
+        main_part, counter = cls._split_name_counter(stem)
+        counter = counter + 1 if counter else 1
+        while True:
+            candidate = f"{main_part}({counter}){suffix}"
+            if candidate not in used_names:
+                used_names.add(candidate)
+                return candidate
+            counter += 1
+
+    @staticmethod
+    def _unique_storage_location(bucket_id, base_location: str, used_locations: set[str] | None = None) -> str:
+        """
+        Make sure storage key is unique. Preserves legacy behavior of appending '_' repeatedly.
+        Also checks against used_locations set to avoid duplicates within the current batch.
+        """
+        used_locations = used_locations or set()
+        if base_location not in used_locations and not settings.STORAGE_IMPL.obj_exist(bucket_id, base_location):
+            return base_location
+        i = 1
+        while True:
+            candidate = f"{base_location}{'_' * i}"
+            if candidate not in used_locations and not settings.STORAGE_IMPL.obj_exist(bucket_id, candidate):
+                return candidate
+            i += 1
 
     @classmethod
     @DB.connection_context()
@@ -433,29 +488,71 @@ class FileService(CommonService):
         safe_parent_path = sanitize_path(parent_path)
 
         err, files = [], []
+        # Prefetch existing doc names once to avoid per-file DB queries in duplicate_name().
+        existing_names = {
+            row[0] for row in Document.select(Document.name).where(Document.kb_id == kb.id).tuples()
+        }
+        used_names = set(existing_names)
+        # Cache doc count once and simulate per-file increment to match original behavior.
+        current_doc_count = DocumentService.get_doc_count(kb.tenant_id)
+        max_file_num = int(os.environ.get("MAX_FILE_NUM_PER_USER", 0))
+
+        def check_doc_health(filename: str):
+            # Match `DocumentService.check_doc_health` behavior but avoid per-file DB count.
+            if 0 < max_file_num <= current_doc_count:
+                raise RuntimeError("Exceed the maximum file number of a free user!")
+            if len(filename.encode("utf-8")) > FILE_NAME_LEN_LIMIT:
+                raise RuntimeError("Exceed the maximum length of file name!")
+
+        pending_docs: list[dict] = []
+        pending_files: list[dict] = []
+        pending_links: list[dict] = []
+        pending_storage_keys: list[tuple[str, str]] = []  # (location, thumbnail_location)
+        pending_storage_writes: list[tuple[str, bytes]] = []  # (key, binary)
+        used_locations: set[str] = set()  # Track locations used in current batch to avoid duplicates
+
         for file_item in file_objs:
+            file = None
+            original_name = "<unknown>"
             try:
-                # Support both file object and (file_obj, metadata) tuple
+                # Support both file object and (file_obj, metadata) tuple (keep it simple/inline)
                 metadata = {}
                 if isinstance(file_item, tuple):
-                    file, metadata = file_item
+                    if len(file_item) == 0:
+                        raise ValueError("Empty upload tuple is not supported")
+                    file = file_item[0]
+                    if len(file_item) > 1 and file_item[1] is not None:
+                        metadata = file_item[1]
                 else:
                     file = file_item
-                
-                DocumentService.check_doc_health(kb.tenant_id, file.filename)
-                filename = duplicate_name(DocumentService.query, name=file.filename, kb_id=kb.id)
+
+                if metadata is None:
+                    metadata = {}
+                if not isinstance(metadata, dict):
+                    raise ValueError("metadata must be a dict")
+
+                original_name = getattr(file, "filename", None) or getattr(file, "name", None) or "<unknown>"
+
+                # Health check without per-file DB count
+                check_doc_health(original_name)
+
+                # De-dupe name in-memory (matches duplicate_name() behavior) and validate length again.
+                filename = self._dedupe_name_in_memory(original_name, used_names)
+                check_doc_health(filename)
+
                 filetype = filename_type(filename)
                 if filetype == FileType.OTHER.value:
                     raise RuntimeError("This type of file has not been supported yet!")
 
-                location = filename if not safe_parent_path else f"{safe_parent_path}/{filename}"
-                while settings.STORAGE_IMPL.obj_exist(kb.id, location):
-                    location += "_"
+                base_location = filename if not safe_parent_path else f"{safe_parent_path}/{filename}"
+                # base_location is already unique: filename is deduplicated via _dedupe_name_in_memory
+                # which adds each candidate to used_names (line 450), ensuring uniqueness within current batch
+                location = base_location
+                used_locations.add(location)
 
                 blob = file.read()
                 if filetype == FileType.PDF.value:
                     blob = read_potential_broken_pdf(blob)
-                settings.STORAGE_IMPL.put(kb.id, location, blob)
 
                 doc_id = get_uuid()
 
@@ -463,7 +560,13 @@ class FileService(CommonService):
                 thumbnail_location = ""
                 if img is not None:
                     thumbnail_location = f"thumbnail_{doc_id}.png"
-                    settings.STORAGE_IMPL.put(kb.id, thumbnail_location, img)
+                    # Thumbnail location is unique by doc_id, but check batch anyway
+                    while thumbnail_location in used_locations:
+                        thumbnail_location = f"thumbnail_{doc_id}_{len(used_locations)}.png"
+                    used_locations.add(thumbnail_location)
+                    pending_storage_writes.append((thumbnail_location, img))
+
+                pending_storage_writes.append((location, blob))
 
                 doc = {
                     "id": doc_id,
@@ -481,12 +584,84 @@ class FileService(CommonService):
                     "thumbnail": thumbnail_location,
                     "meta_fields": metadata if metadata else {}
                 }
-                DocumentService.insert(doc)
+                pending_docs.append(doc)
+                pending_storage_keys.append((location, thumbnail_location))
 
-                FileService.add_file_from_kb(doc, kb_folder["id"], kb.tenant_id)
+                file_id = get_uuid()
+                pending_files.append({
+                    "id": file_id,
+                    "parent_id": kb_folder["id"],
+                    "tenant_id": kb.tenant_id,
+                    "created_by": kb.tenant_id,
+                    "name": doc["name"],
+                    "type": doc["type"],
+                    "size": doc["size"],
+                    "location": doc["location"],
+                    "source_type": FileSource.KNOWLEDGEBASE,
+                })
+                pending_links.append({
+                    "id": get_uuid(),
+                    "file_id": file_id,
+                    "document_id": doc_id,
+                })
+
+                current_doc_count += 1
                 files.append((doc, blob))
             except Exception as e:
-                err.append(file.filename + ": " + str(e))
+                logging.exception("upload_document per-file failed: %s", original_name)
+                err.append(f"{original_name}: {e}")
+
+        # Validate pending lists before any bulk I/O or DB writes.
+        if not (len(pending_docs) == len(pending_files) == len(pending_links) == len(pending_storage_keys) == len(files)):
+            logging.error(
+                "upload_document internal_error: pending list length mismatch docs=%d files=%d links=%d storage_keys=%d return_files=%d",
+                len(pending_docs), len(pending_files), len(pending_links), len(pending_storage_keys), len(files)
+            )
+            err.append("internal_error: pending list length mismatch")
+            return err, []
+
+        # Bulk storage write for this batch (especially beneficial for OpenDAL MySQL backend).
+        # Fail-fast: any storage write error aborts the whole batch to avoid dirty/partial data.
+        if pending_storage_writes:
+            try:
+                if hasattr(settings.STORAGE_IMPL, "put_many"):
+                    settings.STORAGE_IMPL.put_many(kb.id, pending_storage_writes, replace_on_conflict=True)
+                else:
+                    for k, v in pending_storage_writes:
+                        settings.STORAGE_IMPL.put(kb.id, k, v)
+            except Exception as e:
+                logging.exception("upload_document storage_put_failed")
+                # Best-effort cleanup: attempt to delete all keys in this batch.
+                for k, _v in pending_storage_writes:
+                    try:
+                        settings.STORAGE_IMPL.rm(kb.id, k)
+                    except Exception:
+                        pass
+                err.append(f"storage_put_failed: {e}")
+                return err, []
+
+        # Bulk DB insert for all successfully uploaded blobs.
+        if pending_docs:
+            try:
+                with DB.atomic():
+                    bulk_insert_into_db(Document, pending_docs, replace_on_conflict=False)
+                    bulk_insert_into_db(File, pending_files, replace_on_conflict=False)
+                    bulk_insert_into_db(File2Document, pending_links, replace_on_conflict=False)
+            except Exception as e:
+                logging.exception("upload_document bulk_insert_failed")
+                # Best-effort cleanup to avoid orphaned objects in storage if DB insert fails.
+                for loc, thumb_loc in pending_storage_keys:
+                    try:
+                        settings.STORAGE_IMPL.rm(kb.id, loc)
+                    except Exception:
+                        pass
+                    if thumb_loc:
+                        try:
+                            settings.STORAGE_IMPL.rm(kb.id, thumb_loc)
+                        except Exception:
+                            pass
+                err.append(f"bulk_insert_failed: {e}")
+                return err, []
 
         return err, files
 
