@@ -14,6 +14,15 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "absl-py"
+version = "2.3.1"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/10/2a/c93173ffa1b39c1d0395b7e842bbdc62e556ca9d8d3b5572926f3e4ca752/absl_py-2.3.1.tar.gz", hash = "sha256:a97820526f7fbfd2ec1bce83f3f25e3a14840dac0d8e02a0b71cd75db3f77fc9", size = 116588, upload-time = "2025-07-03T09:31:44.05Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/8f/aa/ba0014cc4659328dc818a28827be78e6d97312ab0cb98105a770924dc11e/absl_py-2.3.1-py3-none-any.whl", hash = "sha256:eeecf07f0c2a93ace0772c92e596ace6d3d3996c042b2128459aaae2a76de11d", size = 135811, upload-time = "2025-07-03T09:31:42.253Z" },
+]
+
+[[package]]
 name = "aiofiles"
 version = "25.1.0"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
@@ -378,6 +387,15 @@ source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
 sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/be/a5/8e3f9b6771b0b408517c82d97aed8f2036509bc247d46114925e32fe33f0/asttokens-3.0.1.tar.gz", hash = "sha256:71a4ee5de0bde6a31d64f6b13f2293ac190344478f081c3d1bccfcf5eacb0cb7", size = 62308, upload-time = "2025-11-15T16:43:48.578Z" }
 wheels = [
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/d2/39/e7eaf1799466a4aef85b6a4fe7bd175ad2b1c6345066aa33f1f58d4b18d0/asttokens-3.0.1-py3-none-any.whl", hash = "sha256:15a3ebc0f43c2d0a50eeafea25e19046c68398e487b9f1f5b517f7c0f40f976a", size = 27047, upload-time = "2025-11-15T16:43:16.109Z" },
+]
+
+[[package]]
+name = "async-timeout"
+version = "5.0.1"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/a5/ae/136395dfbfe00dfc94da3f3e136d0b13f394cba8f4841120e34226265780/async_timeout-5.0.1.tar.gz", hash = "sha256:d9321a7a3d5a6a5e187e824d2fa0793ce379a202935782d555d6e9d2735677d3", size = 9274, upload-time = "2024-11-06T16:41:39.6Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/fe/ba/e2081de779ca30d473f21f5b30e0e737c438205440784c7dfc81efc2b029/async_timeout-5.0.1-py3-none-any.whl", hash = "sha256:39e3809566ff85354557ec2398b55e096c8364bacac9405a7a1fa429e77fe76c", size = 6233, upload-time = "2024-11-06T16:41:37.9Z" },
 ]
 
 [[package]]
@@ -3500,6 +3518,32 @@ wheels = [
 ]
 
 [[package]]
+name = "langextract"
+version = "1.0.9"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+dependencies = [
+    { name = "absl-py" },
+    { name = "aiohttp" },
+    { name = "async-timeout" },
+    { name = "exceptiongroup" },
+    { name = "google-genai" },
+    { name = "ml-collections" },
+    { name = "more-itertools" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "requests" },
+    { name = "tqdm" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/1d/a5/e919799e6f27aace0e0cc92c9e561ffba637d43644d5293b018abda4d4b4/langextract-1.0.9.tar.gz", hash = "sha256:4941f1619f3e3df82b38858382e4f713b6f992f2756c9233bbb5f1b0e8723797", size = 91699, upload-time = "2025-08-31T19:50:56.6Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/b7/05/f202e56c896a35bfb46675ad3b4e56204b0dfb3b3b20ace7b552e8b04ce2/langextract-1.0.9-py3-none-any.whl", hash = "sha256:69b9d7ade0e040945b5affda61f74cbabb31c7cb58433d5a110f2d983523bebd", size = 106246, upload-time = "2025-08-31T19:50:55.126Z" },
+]
+
+[[package]]
 name = "langfuse"
 version = "3.10.5"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
@@ -3978,6 +4022,19 @@ wheels = [
 ]
 
 [[package]]
+name = "ml-collections"
+version = "1.1.0"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+dependencies = [
+    { name = "absl-py" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/b8/f8/1a9ae6696dbb6bc9c44ddf5c5e84710d77fe9a35a57e8a06722e1836a4a6/ml_collections-1.1.0.tar.gz", hash = "sha256:0ac1ac6511b9f1566863e0bb0afad0c64e906ea278ad3f4d2144a55322671f6f", size = 61356, upload-time = "2025-04-17T08:25:02.247Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/ab/8a/18d4ff2c7bd83f30d6924bd4ad97abf418488c3f908dea228d6f0961ad68/ml_collections-1.1.0-py3-none-any.whl", hash = "sha256:23b6fa4772aac1ae745a96044b925a5746145a70734f087eaca6626e92c05cbc", size = 76707, upload-time = "2025-04-17T08:24:59.038Z" },
+]
+
+[[package]]
 name = "moodlepy"
 version = "0.24.1"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
@@ -3989,6 +4046,15 @@ dependencies = [
 sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/69/83/d03072735fc822b225efefa7f7646a4ed6cd73d1c717a338871b9958ce5d/moodlepy-0.24.1.tar.gz", hash = "sha256:94d361e4da56748d29910e01979e4652a42220994112b4f07589f200cb7915e3", size = 82174, upload-time = "2024-10-11T11:53:45.433Z" }
 wheels = [
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/18/6b/c526e3230e20171d7791f0fb2137aa4b49c82d9878959f089be1162a7c72/moodlepy-0.24.1-py3-none-any.whl", hash = "sha256:2809ece7a167d7ecc2a744cde188f0af66e1db58863e7a2ed77d1a0b08ff82e2", size = 153323, upload-time = "2024-10-11T11:53:44.149Z" },
+]
+
+[[package]]
+name = "more-itertools"
+version = "10.8.0"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/ea/5d/38b681d3fce7a266dd9ab73c66959406d565b3e85f21d5e66e1181d93721/more_itertools-10.8.0.tar.gz", hash = "sha256:f638ddf8a1a0d134181275fb5d58b086ead7c6a72429ad725c67503f13ba30bd", size = 137431, upload-time = "2025-09-02T15:23:11.018Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/a4/8e/469e5a4a2f5855992e425f3cb33804cc07bf18d48f2db061aec61ce50270/more_itertools-10.8.0-py3-none-any.whl", hash = "sha256:52d4362373dcf7c52546bc4af9a86ee7c4579df9a8dc268be0a2f949d376cc9b", size = 69667, upload-time = "2025-09-02T15:23:09.635Z" },
 ]
 
 [[package]]
@@ -6176,6 +6242,7 @@ dependencies = [
     { name = "azure-identity" },
     { name = "azure-storage-file-datalake" },
     { name = "beartype" },
+    { name = "beautifulsoup4" },
     { name = "bio" },
     { name = "boxsdk" },
     { name = "captcha" },
@@ -6211,6 +6278,7 @@ dependencies = [
     { name = "infinity-sdk" },
     { name = "jira" },
     { name = "json-repair" },
+    { name = "langextract" },
     { name = "langfuse" },
     { name = "mammoth" },
     { name = "markdown" },
@@ -6309,6 +6377,7 @@ requires-dist = [
     { name = "azure-identity", specifier = "==1.17.1" },
     { name = "azure-storage-file-datalake", specifier = "==12.16.0" },
     { name = "beartype", specifier = ">=0.20.0,<1.0.0" },
+    { name = "beautifulsoup4", specifier = ">=4.12.0" },
     { name = "bio", specifier = "==1.7.1" },
     { name = "boxsdk", specifier = ">=10.1.0" },
     { name = "captcha", specifier = ">=0.7.1" },
@@ -6343,6 +6412,7 @@ requires-dist = [
     { name = "infinity-sdk", specifier = "==0.6.15" },
     { name = "jira", specifier = "==3.10.5" },
     { name = "json-repair", specifier = "==0.35.0" },
+    { name = "langextract", specifier = ">=1.0.9" },
     { name = "langfuse", specifier = ">=2.60.0" },
     { name = "mammoth", specifier = ">=1.11.0" },
     { name = "markdown", specifier = "==3.6" },

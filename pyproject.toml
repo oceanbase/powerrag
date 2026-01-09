@@ -152,6 +152,8 @@ dependencies = [
     "pygithub>=2.8.1",
     "asana>=5.2.2",
     "python-gitlab>=7.0.0",
+    "beautifulsoup4>=4.12.0",
+    "langextract>=1.0.9",
 ]
 
 [dependency-groups]
