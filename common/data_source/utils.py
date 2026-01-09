@@ -254,18 +254,21 @@ def create_s3_client(bucket_type: BlobType, credentials: dict[str, Any], europea
     elif bucket_type == BlobType.S3:
         authentication_method = credentials.get("authentication_method", "access_key")
 
+        region_name = credentials.get("region") or None
+
         if authentication_method == "access_key":
             session = boto3.Session(
                 aws_access_key_id=credentials["aws_access_key_id"],
                 aws_secret_access_key=credentials["aws_secret_access_key"],
+                region_name=region_name,
             )
-            return session.client("s3")
+            return session.client("s3", region_name=region_name)
 
         elif authentication_method == "iam_role":
             role_arn = credentials["aws_role_arn"]
 
             def _refresh_credentials() -> dict[str, str]:
-                sts_client = boto3.client("sts")
+                sts_client = boto3.client("sts", region_name=credentials.get("region") or None)
                 assumed_role_object = sts_client.assume_role(
                     RoleArn=role_arn,
                     RoleSessionName=f"onyx_blob_storage_{int(datetime.now().timestamp())}",
@@ -285,11 +288,11 @@ def create_s3_client(bucket_type: BlobType, credentials: dict[str, Any], europea
             )
             botocore_session = get_session()
             botocore_session._credentials = refreshable
-            session = boto3.Session(botocore_session=botocore_session)
-            return session.client("s3")
+            session = boto3.Session(botocore_session=botocore_session, region_name=region_name)
+            return session.client("s3", region_name=region_name)
 
         elif authentication_method == "assume_role":
-            return boto3.client("s3")
+            return boto3.client("s3", region_name=region_name)
 
         else:
             raise ValueError("Invalid authentication method for S3.")
@@ -312,12 +315,15 @@ def create_s3_client(bucket_type: BlobType, credentials: dict[str, Any], europea
             region_name=credentials["region"],
         )
     elif bucket_type == BlobType.S3_COMPATIBLE:
+        addressing_style = credentials.get("addressing_style", "virtual")
+
         return boto3.client(
             "s3",
             endpoint_url=credentials["endpoint_url"],
             aws_access_key_id=credentials["aws_access_key_id"],
             aws_secret_access_key=credentials["aws_secret_access_key"],
-        )    
+            config=Config(s3={'addressing_style': addressing_style}),
+        )
 
     else:
         raise ValueError(f"Unsupported bucket type: {bucket_type}")
@@ -730,7 +736,7 @@ def build_time_range_query(
     """Build time range query for Gmail API"""
     query = ""
     if time_range_start is not None and time_range_start != 0:
-        query += f"after:{int(time_range_start)}"
+        query += f"after:{int(time_range_start) + 1}"
     if time_range_end is not None and time_range_end != 0:
         query += f" before:{int(time_range_end)}"
     query = query.strip()
@@ -773,6 +779,15 @@ def time_str_to_utc(time_str: str):
     from datetime import datetime
 
     return datetime.fromisoformat(time_str.replace("Z", "+00:00"))
+
+
+def gmail_time_str_to_utc(time_str: str):
+    """Convert Gmail RFC 2822 time string to UTC."""
+    from email.utils import parsedate_to_datetime
+    from datetime import timezone
+
+    dt = parsedate_to_datetime(time_str)
+    return dt.astimezone(timezone.utc)
 
 
 # Notion Utilities

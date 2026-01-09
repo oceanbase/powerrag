@@ -22,9 +22,6 @@ import base64
 import re
 import sys
 import threading
-import subprocess
-import tempfile
-from pathlib import Path
 from io import BytesIO
 import pdfplumber
 from typing import Union, Dict, TypedDict, Tuple
@@ -54,118 +51,6 @@ class MinerUPdfParser:
         self.filename = filename
         self.enable_ocr = enable_ocr
         self.mineru_cli_path = "mineru"
-        # if enable_ocr:
-        #     global ocr
-        #     ocr = OCR()
-
-    def _check_cli_installation(self) -> bool:
-        """Check if mineru CLI is installed"""
-        subprocess_kwargs = {
-            "capture_output": True,
-            "text": True,
-            "check": True,
-            "encoding": "utf-8",
-            "errors": "ignore",
-        }
-        
-        try:
-            result = subprocess.run([self.mineru_cli_path, "--version"], **subprocess_kwargs)
-            version_info = result.stdout.strip()
-            if version_info:
-                logging.info(f"[MinerU CLI] Detected version: {version_info}")
-            return True
-        except (subprocess.CalledProcessError, FileNotFoundError, Exception) as e:
-            logging.debug(f"[MinerU CLI] Not available: {e}")
-            return False
-
-    def _parse_with_cli(self, pdf_path: Path, from_page: int, to_page: int) -> Tuple[int, Union[Dict, str]]:
-        """
-        Parse PDF using mineru CLI (fallback method)
-        
-        Returns:
-            Tuple of (status_code, result_dict or error_message)
-        """
-        import shutil
-        
-        try:
-            # Create temporary output directory
-            output_dir = Path(tempfile.mkdtemp(prefix="mineru_cli_"))
-            
-            # Build mineru command
-            cmd = [
-                self.mineru_cli_path,
-                "-p", str(pdf_path),
-                "-o", str(output_dir),
-                "-m", self.parse_method
-            ]
-            
-            # Add language parameter
-            if self.lang_list:
-                cmd.extend(["-l", ",".join(self.lang_list)])
-            
-            logging.info(f"[MinerU CLI] Running command: {' '.join(cmd)}")
-            
-            # Run mineru CLI
-            subprocess_kwargs = {
-                "stdout": subprocess.PIPE,
-                "stderr": subprocess.PIPE,
-                "text": True,
-                "encoding": "utf-8",
-                "errors": "ignore",
-            }
-            
-            process = subprocess.Popen(cmd, **subprocess_kwargs)
-            stdout, stderr = process.communicate()
-            
-            if process.returncode != 0:
-                logging.error(f"[MinerU CLI] Command failed: {stderr}")
-                return 500, f"MinerU CLI execution failed: {stderr}"
-            
-            # Read output files
-            pdf_stem = pdf_path.stem
-            result_dir = output_dir / pdf_stem / self.parse_method
-            md_file = result_dir / f"{pdf_stem}.md"
-            content_list_file = result_dir / f"{pdf_stem}_content_list.json"
-            
-            if not md_file.exists():
-                return 500, f"MinerU CLI output file not found: {md_file}"
-            
-            # Read markdown content
-            with open(md_file, "r", encoding="utf-8") as f:
-                md_content = f.read()
-            
-            # Collect images
-            images = {}
-            images_dir = result_dir / "images"
-            if images_dir.exists():
-                for img_file in images_dir.glob("*"):
-                    if img_file.is_file():
-                        with open(img_file, "rb") as f:
-                            img_base64 = base64.b64encode(f.read()).decode("utf-8")
-                            images[img_file.name] = img_base64
-            
-            # Format result to match API response structure
-            result = {
-                "results": {
-                    pdf_stem: {
-                        "md_content": md_content,
-                        "images": images
-                    }
-                }
-            }
-            
-            # Clean up temporary directory
-            try:
-                shutil.rmtree(output_dir)
-            except Exception as e:
-                logging.warning(f"[MinerU CLI] Failed to clean up temp dir: {e}")
-            
-            logging.info(f"[MinerU CLI] Successfully parsed PDF with {len(images)} images")
-            return 200, result
-            
-        except Exception as e:
-            logging.error(f"[MinerU CLI] Unexpected error: {e}")
-            return 500, f"MinerU CLI parsing failed: {str(e)}"
 
     def __call__(self, binary=None, from_page=0, to_page=100000, callback=None, kb_id: str = "default"):
         if callback:
@@ -218,9 +103,9 @@ class MinerUPdfParser:
     def parse_document(self, filename, binary=None, from_page: int = 0, to_page: int = 100000) -> Tuple[int, Union[Dict, str]]:
         """
         Parse document using MinerU with intelligent fallback:
-        1. Try API service first (if configured)
-        2. Fall back to CLI (if installed)
-        3. Return error if neither available
+        1. Try API service (if configured)
+        2. todo:Try MinerUClient with vllm interface (if available and configured)
+        3. Return error if none available
 
         Args:
             filename: Name of the document file
@@ -234,41 +119,7 @@ class MinerUPdfParser:
                 - Response content (Dict on success, error message string on failure)
         """
         
-        # Strategy 1: use CLI
-        if self._check_cli_installation():
-            logging.info("[MinerU] Using CLI method")
-            temp_pdf_path = None
-            try:
-                # Prepare PDF file for CLI
-                if binary is not None:
-                    # Save binary to temporary file
-                    temp_dir = Path(tempfile.mkdtemp(prefix="mineru_input_"))
-                    temp_pdf_path = temp_dir / Path(filename).name
-                    with open(temp_pdf_path, "wb") as f:
-                        f.write(binary)
-                    pdf_path = temp_pdf_path
-                elif os.path.isfile(filename):
-                    pdf_path = Path(filename)
-                else:
-                    return 400, f"Unable to process document: {filename}"
-                
-                # Parse with CLI
-                status, result = self._parse_with_cli(pdf_path, from_page, to_page)
-                
-                # Clean up temporary file
-                if temp_pdf_path and temp_pdf_path.exists():
-                    try:
-                        temp_pdf_path.unlink()
-                        temp_pdf_path.parent.rmdir()
-                    except Exception as e:
-                        logging.warning(f"[MinerU CLI] Failed to clean up temp file: {e}")
-                
-                return status, result
-            except Exception as e:
-                logging.error(f"[MinerU] CLI method failed: {e}")
-                # return 500, f"MinerU CLI parsing failed: {str(e)}"
-
-    # Strategy 2: Try API service first
+        # Strategy 1: Try API service first
         mineru_config = get_base_config("mineru", {}) or {}
 
         try:
@@ -277,12 +128,13 @@ class MinerUPdfParser:
         except Exception as e:
             logging.warning(f"[MinerU] API service failed: {e}")
 
+        # Todo: Strategy 2: Try MinerUClient with vllm interface
 
         # Strategy 3: No method available
         error_msg = (
             "MinerU is not available. Please either:\n"
             "1. Configure MinerU API service in conf/service_conf.yaml under 'mineru.hosts', or\n"
-            "2. Install MinerU CLI: pip install -U 'mineru[core]'"
+            "2. Install MinerUClient: pip install mineru-vl-utils and configure 'vllm_server.url' and 'vllm_server.model_type=mineru'"
         )
         logging.error(f"[MinerU] {error_msg}")
         return 503, error_msg
@@ -433,9 +285,6 @@ class MinerUPdfParser:
                     return re.sub(src_pattern, f"\\1{image_url}\\3", img_tag)
 
                 updated_content = re.sub(html_pattern, replace_html_img, updated_content)
-                # if self.enable_ocr:
-                #     image_description = self.ocr_images(img_bytes)
-                #     updated_content = updated_content.replace("$$00$$", image_description)
             except Exception as e:
                 logging.error(f"Failed to store image {img_name}: {str(e)}")
                 continue
@@ -584,30 +433,6 @@ class MinerUPdfParser:
             return txt
         # Remove position tags: @@page_num\tleft\tright\ttop\tbottom##
         return re.sub(r"@@[0-9-]+\t[0-9.\t]+##", "", txt)
-
-    def ocr_images(self, binary) -> str:
-        """
-        OCR images from MinerU response to text
-        
-        Note: OCR functionality is currently disabled/not implemented.
-        This method is kept for backward compatibility.
-        """
-        if binary is None:
-            return ""
-        # OCR functionality is not currently implemented
-        # Uncomment and configure OCR if needed:
-        # if ocr is None:
-        #     return ""
-        # try:
-        #     img = Image.open(io.BytesIO(binary)).convert("RGB")
-        #     img_array = np.array(img.convert("RGB"))
-        #     bxs = ocr(img_array)
-        #     txt = ",".join([t[0] for _, t in bxs if t[0]])
-        #     return txt
-        # except Exception as e:
-        #     logging.error(f"Failed to ocr images: {str(e)}")
-        #     return ""
-        return ""
 
     @staticmethod
     def total_page_number(fnm, binary=None):

@@ -2,6 +2,7 @@ import { Toaster as Sonner } from '@/components/ui/sonner';
 import { Toaster } from '@/components/ui/toaster';
 import i18n from '@/locales/config';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { configResponsive } from 'ahooks';
 import { App, ConfigProvider, ConfigProviderProps, theme } from 'antd';
 import pt_BR from 'antd/lib/locale/pt_BR';
 import deDE from 'antd/locale/de_DE';
@@ -23,6 +24,18 @@ import { SidebarProvider } from './components/ui/sidebar';
 import { TooltipProvider } from './components/ui/tooltip';
 import { ThemeEnum } from './constants/common';
 import storage from './utils/authorization-util';
+
+import 'react-photo-view/dist/react-photo-view.css';
+
+configResponsive({
+  sm: 640,
+  md: 768,
+  lg: 1024,
+  xl: 1280,
+  '2xl': 1536,
+  '3xl': 1780,
+  '4xl': 1980,
+});
 
 dayjs.extend(customParseFormat);
 dayjs.extend(advancedFormat);

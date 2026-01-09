@@ -18,7 +18,7 @@
 
 import os
 import logging
-from flask import Blueprint, request, jsonify, Response
+from quart import Blueprint, request, jsonify, Response
 from powerrag.server.services.parse_service import PowerRAGParseService
 from powerrag.server.services.convert_service import PowerRAGConvertService
 from powerrag.server.services.split_service import PowerRAGSplitService
@@ -50,7 +50,7 @@ GOTENBERG_URL = gotenberg_config.get("url", os.environ.get("GOTENBERG_URL", "htt
 # ============================================================================
 
 @powerrag_bp.route("/run", methods=["POST"])
-def run_parse():
+async def run_parse():
     """
     Run PowerRAG parsing tasks using task_executor (async) - 推荐使用
     
@@ -83,7 +83,7 @@ def run_parse():
     """
     logger.info(f"=== PowerRAG /run endpoint called from {request.remote_addr} ===")
     try:
-        data = request.get_json()
+        data = await request.get_json()
         
         if not data:
             return jsonify({
@@ -219,7 +219,7 @@ def run_parse():
 
 @powerrag_bp.route("/parse", methods=["POST"])
 @apikey_required
-def parse_document(tenant_id):
+async def parse_document(tenant_id):
     """
     Quick parse for preview (synchronous) - 仅用于快速预览
     
@@ -247,7 +247,7 @@ def parse_document(tenant_id):
     }
     """
     try:
-        data = request.get_json()
+        data = await request.get_json()
         
         if not data:
             return jsonify({
@@ -300,7 +300,7 @@ def parse_document(tenant_id):
 
 @powerrag_bp.route("/parse/batch", methods=["POST"])
 @apikey_required
-def parse_documents_batch(tenant_id):
+async def parse_documents_batch(tenant_id):
     """
     Batch parse multiple documents (using ThreadPoolExecutor like FileService.parse_docs)
     
@@ -312,7 +312,7 @@ def parse_documents_batch(tenant_id):
     }
     """
     try:
-        data = request.get_json()
+        data = await request.get_json()
         
         if not data:
             return jsonify({
@@ -450,7 +450,7 @@ def parse_upload_file():
 
 @powerrag_bp.route("/convert", methods=["POST"])
 @apikey_required
-def convert_document(tenant_id):
+async def convert_document(tenant_id):
     """
     Convert document format using PowerRAG converters
     
@@ -478,7 +478,7 @@ def convert_document(tenant_id):
     - to_page (int): End page number (default: 100000)
     """
     try:
-        data = request.get_json()
+        data = await request.get_json()
         
         if not data:
             return jsonify({
@@ -517,7 +517,7 @@ def convert_document(tenant_id):
 
 @powerrag_bp.route("/convert/upload", methods=["POST"])
 @apikey_required
-def convert_upload_file(tenant_id):
+async def convert_upload_file(tenant_id):
     """
     Convert uploaded file directly (with file download support)
     
@@ -636,12 +636,482 @@ def convert_upload_file(tenant_id):
 
 
 # ============================================================================
+# 文档解析为 Markdown 接口（不切分）
+# ============================================================================
+
+@powerrag_bp.route("/parse_to_md", methods=["POST"])
+@apikey_required
+async def parse_to_md(tenant_id):
+    """
+    Parse document to Markdown WITHOUT chunking
+    
+    将文档解析为 Markdown 格式，但不进行切分。
+    适用于需要完整文档内容或外部系统自行处理切分的场景。
+    
+    支持的文件格式:
+    - PDF (.pdf)
+    - Office 文档 (.doc, .docx, .ppt, .pptx)
+    - 图片 (.jpg, .png)
+    - HTML (.html, .htm)
+    
+    Authentication: Requires RAGFlow API key in Authorization header (Bearer token)
+    
+    Request JSON:
+    {
+        "doc_id": "document_id",  // RAGFlow 文档 ID
+        "config": {
+            "layout_recognize": "mineru",  // 布局识别引擎: mineru 或 dots_ocr
+            "enable_ocr": false,           // 是否启用 OCR
+            "enable_formula": false,       // 是否识别公式
+            "enable_table": true,          // 是否识别表格
+            "from_page": 0,                // 起始页（仅 PDF）
+            "to_page": 100000              // 结束页（仅 PDF）
+        }
+    }
+    
+    Response:
+    {
+        "code": 0,
+        "data": {
+            "doc_id": "document_id",
+            "doc_name": "document.pdf",
+            "markdown": "# Title\n\nContent...",  // 完整的 Markdown 内容
+            "markdown_length": 5000,
+            "images": {                            // 文档中的图片（base64）
+                "image_001.png": "base64_data...",
+                "image_002.png": "base64_data..."
+            },
+            "total_images": 2
+        },
+        "message": "success"
+    }
+    """
+    try:
+        data = await request.get_json()
+        
+        if not data:
+            return jsonify({
+                "code": 400,
+                "message": "No JSON data provided"
+            }), 400
+        
+        doc_id = data.get("doc_id")
+        config = data.get("config", {})
+        
+        if not doc_id:
+            return jsonify({
+                "code": 400,
+                "message": "doc_id is required"
+            }), 400
+        
+        # Get document from database
+        exist, doc = DocumentService.get_by_id(doc_id)
+        if not exist:
+            return jsonify({
+                "code": 404,
+                "message": f"Document {doc_id} not found"
+            }), 404
+        
+        # Get document binary data from storage
+        bucket, name = File2DocumentService.get_storage_address(doc_id=doc_id)
+        binary = settings.STORAGE_IMPL.get(bucket, name)
+        
+        if not binary:
+            return jsonify({
+                "code": 404,
+                "message": f"Document binary data not found for {doc_id}"
+            }), 404
+        
+        # Create service
+        gotenberg_url = config.get("gotenberg_url", GOTENBERG_URL)
+        service = PowerRAGParseService(gotenberg_url=gotenberg_url)
+        
+        # Parse document to markdown (no chunking)
+        from pathlib import Path
+        file_ext = Path(doc.name).suffix.lstrip('.').lower()
+        
+        # Determine format type
+        # Supported: PDF, Office (doc/docx/ppt/pptx), HTML, Images (jpg/png)
+        format_type_map = {
+            'pdf': 'pdf',
+            'docx': 'office', 'doc': 'office',
+            'xlsx': 'office', 'xls': 'office',
+            'pptx': 'office', 'ppt': 'office',
+            'html': 'html', 'htm': 'html',
+            'jpg': 'image', 'jpeg': 'image',
+            'png': 'image'
+        }
+        
+        format_type = format_type_map.get(file_ext)
+        if not format_type:
+            return jsonify({
+                "code": 400,
+                "message": f"Unsupported file format: {file_ext}. Supported formats: pdf, doc, docx, ppt, pptx, jpg, png, html"
+            }), 400
+        
+        # Use _parse_to_markdown method (returns tuple of markdown_content and images)
+        md_content, images = service._parse_to_markdown(
+            filename=doc.name,
+            binary=binary,
+            format_type=format_type,
+            config=config
+        )
+        
+        return jsonify({
+            "code": 0,
+            "data": {
+                "doc_id": doc_id,
+                "doc_name": doc.name,
+                "markdown": md_content,
+                "markdown_length": len(md_content),
+                "images": images,
+                "total_images": len(images)
+            },
+            "message": "success"
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Parse to markdown error: {e}", exc_info=True)
+        return jsonify({
+            "code": 500,
+            "message": str(e)
+        }), 500
+
+
+@powerrag_bp.route("/parse_to_md/async", methods=["POST"])
+@apikey_required
+async def parse_to_md_async(tenant_id):
+    """
+    Parse document to Markdown asynchronously (submit task)
+    
+    异步解析文档为 Markdown，返回任务 ID。
+    适用于大文档或需要长时间处理的场景。
+    
+    Authentication: Requires RAGFlow API key in Authorization header (Bearer token)
+    
+    Request JSON:
+    {
+        "doc_id": "document_id",  // RAGFlow 文档 ID
+        "config": {
+            "layout_recognize": "mineru",
+            "enable_ocr": false,
+            "enable_formula": false,
+            "enable_table": true
+        }
+    }
+    
+    Response:
+    {
+        "code": 0,
+        "data": {
+            "task_id": "uuid-string"
+        },
+        "message": "Task submitted successfully"
+    }
+    """
+    try:
+        data = await request.get_json()
+        
+        if not data:
+            return jsonify({
+                "code": 400,
+                "message": "No JSON data provided"
+            }), 400
+        
+        doc_id = data.get("doc_id")
+        config = data.get("config", {})
+        
+        if not doc_id:
+            return jsonify({
+                "code": 400,
+                "message": "doc_id is required"
+            }), 400
+        
+        # Verify document exists and get binary data in the main thread
+        # (cannot access storage from thread pool workers)
+        exist, doc = DocumentService.get_by_id(doc_id)
+        if not exist:
+            return jsonify({
+                "code": 404,
+                "message": f"Document {doc_id} not found"
+            }), 404
+        
+        # Get document binary data NOW (in main thread with app context)
+        bucket, name = File2DocumentService.get_storage_address(doc_id=doc_id)
+        if not bucket or not name:
+            return jsonify({
+                "code": 404,
+                "message": f"Document storage address not found for {doc_id}"
+            }), 404
+        
+        binary = settings.STORAGE_IMPL.get(bucket, name)
+        if not binary:
+            return jsonify({
+                "code": 404,
+                "message": f"Document binary data not found for {doc_id}"
+            }), 404
+        
+        # Determine format type
+        from pathlib import Path
+        file_ext = Path(doc.name).suffix.lstrip('.').lower()
+        format_type_map = {
+            'pdf': 'pdf', 'docx': 'office', 'doc': 'office',
+            'xlsx': 'office', 'xls': 'office', 'pptx': 'office', 'ppt': 'office',
+            'html': 'html', 'htm': 'html',
+            'jpg': 'image', 'jpeg': 'image', 'png': 'image'
+        }
+        format_type = format_type_map.get(file_ext, 'pdf')
+        
+        # Get task manager and service
+        from powerrag.server.services.parse_to_md_task_manager import get_task_manager
+        task_manager = get_task_manager()
+        
+        gotenberg_url = config.get("gotenberg_url", GOTENBERG_URL)
+        service = PowerRAGParseService(gotenberg_url=gotenberg_url)
+        
+        # Submit task with binary data (not doc_id)
+        task_id = task_manager.submit_task(
+            service=service,
+            method_name="parse_to_md",
+            filename=doc.name,
+            binary=binary,
+            format_type=format_type,
+            config=config
+        )
+        
+        return jsonify({
+            "code": 0,
+            "data": {
+                "task_id": task_id
+            },
+            "message": "Task submitted successfully"
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Parse to markdown async error: {e}", exc_info=True)
+        return jsonify({
+            "code": 500,
+            "message": str(e)
+        }), 500
+
+
+@powerrag_bp.route("/parse_to_md/status/<task_id>", methods=["GET"])
+@apikey_required
+def get_parse_to_md_status(task_id):
+    """
+    Get parse_to_md task status and result
+    
+    查询异步解析任务的状态和结果。
+    
+    Authentication: Requires RAGFlow API key in Authorization header (Bearer token)
+    
+    Response:
+    {
+        "code": 0,
+        "data": {
+            "task_id": "uuid-string",
+            "status": "pending|processing|success|failed|not_found",
+            "created_at": "2025-01-01T00:00:00",
+            "updated_at": "2025-01-01T00:00:00",
+            "result": {
+                "doc_id": "...",
+                "doc_name": "...",
+                "markdown": "...",
+                "markdown_length": 5000,
+                "images": {...},
+                "total_images": 2
+            },
+            "error": "Error message if failed"
+        },
+        "message": "success"
+    }
+    """
+    try:
+        from powerrag.server.services.parse_to_md_task_manager import get_task_manager
+        task_manager = get_task_manager()
+        
+        status = task_manager.get_task_status(task_id)
+        
+        if status.get("status") == "not_found":
+            return jsonify({
+                "code": 404,
+                "message": "Task not found",
+                "data": status
+            }), 404
+        
+        return jsonify({
+            "code": 0,
+            "data": status,
+            "message": "success"
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Get parse_to_md status error: {e}", exc_info=True)
+        return jsonify({
+            "code": 500,
+            "message": str(e)
+        }), 500
+
+
+@powerrag_bp.route("/parse_to_md/upload", methods=["POST"])
+@apikey_required
+async def parse_to_md_upload(tenant_id):
+    """
+    Parse uploaded file to Markdown WITHOUT chunking
+    
+    直接上传文件并解析为 Markdown，不进行切分。
+    
+    支持的文件格式:
+    - PDF (.pdf)
+    - Office 文档 (.doc, .docx, .ppt, .pptx)
+    - 图片 (.jpg, .png)
+    - HTML (.html, .htm)
+    
+    Authentication: Requires RAGFlow API key in Authorization header (Bearer token)
+    
+    Request (multipart/form-data):
+    - file: File to parse (required) - supports PDF, Office (doc/docx/ppt/pptx), Images (jpg/png), HTML
+    - config: JSON string of parser config (optional)
+    
+    Config parameters:
+    - layout_recognize (str): mineru or dots_ocr (default: mineru)
+    - enable_ocr (bool): Enable OCR (default: false)
+    - enable_formula (bool): Enable formula recognition (default: false)
+    - enable_table (bool): Enable table recognition (default: true)
+    - from_page (int): Start page number (default: 0)
+    - to_page (int): End page number (default: 100000)
+    
+    Response JSON:
+    {
+        "code": 0,
+        "data": {
+            "filename": "document.pdf",
+            "markdown": "# Title\n\nContent...",
+            "markdown_length": 5000,
+            "images": {...},
+            "total_images": 2
+        },
+        "message": "success"
+    }
+    """
+    try:
+        # Check if file is present
+        files = await request.files
+        if 'file' not in files:
+            return jsonify({
+                "code": 400,
+                "message": "No file provided"
+            }), 400
+        
+        file = files['file']
+        if file.filename == '':
+            return jsonify({
+                "code": 400,
+                "message": "No file selected"
+            }), 400
+        
+        # Parse config from JSON string if provided
+        import json
+        form = await request.form
+        config_str = form.get('config', '{}')
+        try:
+            config = json.loads(config_str)
+        except json.JSONDecodeError:
+            return jsonify({
+                "code": 400,
+                "message": "Invalid JSON in config parameter"
+            }), 400
+        
+        # Read file binary
+        filename = file.filename
+        logger.info(f"Received file upload: filename={filename}, file object={file}")
+        
+        if not filename:
+            return jsonify({
+                "code": 400,
+                "message": "Filename is required"
+            }), 400
+        
+        binary = file.read()
+        if not binary:
+            return jsonify({
+                "code": 400,
+                "message": "File is empty"
+            }), 400
+        
+        # Add filename to config
+        config['filename'] = filename
+        
+        # Determine format type
+        from pathlib import Path
+        file_ext = Path(filename).suffix.lstrip('.').lower()
+        
+        logger.info(f"Parsed filename: {filename}, extension: '{file_ext}'")
+        
+        if not file_ext:
+            return jsonify({
+                "code": 400,
+                "message": f"File must have an extension. Filename: '{filename}', parsed extension: '{file_ext}'"
+            }), 400
+        
+        # Supported: PDF, Office (doc/docx/ppt/pptx), HTML, Markdown, Images (jpg/png)
+        format_type_map = {
+            'pdf': 'pdf',
+            'docx': 'office', 'doc': 'office',
+            'xlsx': 'office', 'xls': 'office',
+            'pptx': 'office', 'ppt': 'office',
+            'html': 'html', 'htm': 'html',
+            'jpg': 'image', 'jpeg': 'image',
+            'png': 'image'
+        }
+        
+        format_type = format_type_map.get(file_ext)
+        if not format_type:
+            return jsonify({
+                "code": 400,
+                "message": f"Unsupported file format: {file_ext}. Supported formats: pdf, doc, docx, ppt, pptx, jpg, png, html"
+            }), 400
+        
+        # Create service and parse
+        gotenberg_url = config.get("gotenberg_url", GOTENBERG_URL)
+        service = PowerRAGParseService(gotenberg_url=gotenberg_url)
+        
+        # Parse to markdown
+        md_content, images = service._parse_to_markdown(
+            filename=filename,
+            binary=binary,
+            format_type=format_type,
+            config=config
+        )
+        
+        # Return as JSON
+        return jsonify({
+            "code": 0,
+            "data": {
+                "filename": filename,
+                "markdown": md_content,
+                "markdown_length": len(md_content),
+                "images": images,
+                "total_images": len(images)
+            },
+            "message": "success"
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Parse to markdown (upload) error: {e}", exc_info=True)
+        return jsonify({
+            "code": 500,
+            "message": str(e)
+        }), 500
+
+
+# ============================================================================
 # 文档切片接口
 # ============================================================================
 
 @powerrag_bp.route("/split", methods=["POST"])
 @apikey_required
-def split_text(tenant_id):
+async def split_text(tenant_id):
     """
     Split text into chunks using powerrag/app chunking methods
     
@@ -670,7 +1140,7 @@ def split_text(tenant_id):
     }
     """
     try:
-        data = request.get_json()
+        data = await request.get_json()
         
         if not data:
             return jsonify({
@@ -717,7 +1187,7 @@ def split_text(tenant_id):
 
 @powerrag_bp.route("/extract", methods=["POST"])
 @apikey_required
-def extract_from_document(tenant_id):
+async def extract_from_document(tenant_id):
     """
     Extract information from document using PowerRAG extractors
     
@@ -732,7 +1202,7 @@ def extract_from_document(tenant_id):
     }
     """
     try:
-        data = request.get_json()
+        data = await request.get_json()
         
         if not data:
             return jsonify({
@@ -769,7 +1239,7 @@ def extract_from_document(tenant_id):
 
 @powerrag_bp.route("/extract/text", methods=["POST"])
 @apikey_required
-def extract_from_text(tenant_id):
+async def extract_from_text(tenant_id):
     """
     Extract information from raw text (no doc_id required)
     
@@ -781,7 +1251,7 @@ def extract_from_text(tenant_id):
     }
     """
     try:
-        data = request.get_json()
+        data = await request.get_json()
         
         if not data:
             return jsonify({
@@ -817,7 +1287,8 @@ def extract_from_text(tenant_id):
 
 
 @powerrag_bp.route("/extract/batch", methods=["POST"])
-def extract_batch(tenant_id):
+@apikey_required
+async def extract_batch(tenant_id):
     """
     Extract information from multiple documents
     
@@ -829,7 +1300,7 @@ def extract_batch(tenant_id):
     }
     """
     try:
-        data = request.get_json()
+        data = await request.get_json()
         
         if not data:
             return jsonify({
@@ -885,7 +1356,7 @@ def extract_batch(tenant_id):
 
 @powerrag_bp.route("/struct_extract/submit", methods=["POST"])
 @apikey_required
-def submit_extraction_task(tenant_id):
+async def submit_extraction_task(tenant_id):
     """
     Submit a langextract extraction task
     
@@ -952,7 +1423,7 @@ def submit_extraction_task(tenant_id):
     }
     """
     try:
-        data = request.get_json()
+        data = await request.get_json()
         
         if not data:
             return jsonify({

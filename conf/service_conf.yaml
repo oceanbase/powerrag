@@ -17,6 +17,8 @@ minio:
   user: 'rag_flow'
   password: 'infini_rag_flow'
   host: 'localhost:9000'
+  bucket: ''
+  prefix_path: ''
 es:
   hosts: 'http://localhost:1200'
   username: 'elastic'
@@ -28,14 +30,19 @@ os:
 infinity:
   uri: 'localhost:23817'
   db_name: 'default_db'
-redis:
-  db: 1
-  password: 'infini_rag_flow'
-  host: 'localhost:6379'
 oceanbase:
-  scheme: 'mysql' # set 'mysql' to create connection using mysql config
+  scheme: 'oceanbase' # set 'mysql' to create connection using mysql config
   config:
     db_name: 'test'
+    user: 'root@ragflow'
+    password: 'infini_rag_flow'
+    host: 'localhost'
+    port: 2881
+redis:
+  db: 1
+  username: ''
+  password: 'infini_rag_flow'
+  host: 'localhost:6379'
 # gotenberg:
 #   url: 'http://localhost:3000'
 #   timeout: 60
@@ -65,6 +72,8 @@ user_default_llm:
 #   access_key: 'access_key'
 #   secret_key: 'secret_key'
 #   region: 'region'
+#gcs:
+#  bucket: 'bridgtl-edm-d-bucket-ragflow'
 # oss:
 #   access_key: 'access_key'
 #   secret_key: 'secret_key'

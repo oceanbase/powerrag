@@ -34,9 +34,26 @@ export const featchDataSourceDetail = (id: string) =>
   request.get(api.dataSourceDetail(id));
 
 export const startGoogleDriveWebAuth = (payload: { credentials: string }) =>
-  request.post(api.googleDriveWebAuthStart, { data: payload });
+  request.post(api.googleWebAuthStart('google-drive'), { data: payload });
 
 export const pollGoogleDriveWebAuthResult = (payload: { flow_id: string }) =>
-  request.post(api.googleDriveWebAuthResult, { data: payload });
+  request.post(api.googleWebAuthResult('google-drive'), { data: payload });
+
+// Gmail web auth follows the same pattern as Google Drive, but uses
+// Gmail-specific endpoints and is consumed by the GmailTokenField UI.
+export const startGmailWebAuth = (payload: { credentials: string }) =>
+  request.post(api.googleWebAuthStart('gmail'), { data: payload });
+
+export const pollGmailWebAuthResult = (payload: { flow_id: string }) =>
+  request.post(api.googleWebAuthResult('gmail'), { data: payload });
+
+export const startBoxWebAuth = (payload: {
+  client_id: string;
+  client_secret: string;
+  redirect_uri?: string;
+}) => request.post(api.boxWebAuthStart(), { data: payload });
+
+export const pollBoxWebAuthResult = (payload: { flow_id: string }) =>
+  request.post(api.boxWebAuthResult(), { data: payload });
 
 export default dataSourceService;

@@ -49,10 +49,12 @@ class RetCode(IntEnum, CustomEnum):
     RUNNING = 106
     PERMISSION_ERROR = 108
     AUTHENTICATION_ERROR = 109
+    BAD_REQUEST = 400
     UNAUTHORIZED = 401
     SERVER_ERROR = 500
     FORBIDDEN = 403
     NOT_FOUND = 404
+    CONFLICT = 409
 
 
 class StatusEnum(Enum):
@@ -72,6 +74,7 @@ class LLMType(StrEnum):
     IMAGE2TEXT = 'image2text'
     RERANK = 'rerank'
     TTS = 'tts'
+    OCR = 'ocr'
 
 
 class TaskStatus(StrEnum):
@@ -121,7 +124,18 @@ class FileSource(StrEnum):
     SHAREPOINT = "sharepoint"
     SLACK = "slack"
     TEAMS = "teams"
-
+    WEBDAV = "webdav"
+    MOODLE = "moodle"
+    DROPBOX = "dropbox"
+    BOX = "box"
+    R2 = "r2"
+    OCI_STORAGE = "oci_storage"
+    GOOGLE_CLOUD_STORAGE = "google_cloud_storage"
+    AIRTABLE = "airtable"
+    ASANA = "asana"
+    GITHUB = "github"
+    GITLAB = "gitlab"
+    IMAP = "imap"
 
 class PipelineTaskType(StrEnum):
     PARSE = "Parse"
@@ -129,6 +143,7 @@ class PipelineTaskType(StrEnum):
     RAPTOR = "RAPTOR"
     GRAPH_RAG = "GraphRAG"
     MINDMAP = "Mindmap"
+    MEMORY = "Memory"
 
 
 VALID_PIPELINE_TASK_TYPES = {PipelineTaskType.PARSE, PipelineTaskType.DOWNLOAD, PipelineTaskType.RAPTOR,
@@ -147,6 +162,24 @@ class Storage(Enum):
     AWS_S3 = 4
     OSS = 5
     OPENDAL = 6
+    GCS = 7
+
+
+class MemoryType(Enum):
+    RAW = 0b0001          # 1 << 0 = 1 (0b00000001)
+    SEMANTIC = 0b0010     # 1 << 1 = 2 (0b00000010)
+    EPISODIC = 0b0100     # 1 << 2 = 4 (0b00000100)
+    PROCEDURAL = 0b1000   # 1 << 3 = 8 (0b00001000)
+
+
+class MemoryStorageType(StrEnum):
+    TABLE = "table"
+    GRAPH = "graph"
+
+
+class ForgettingPolicy(StrEnum):
+    FIFO = "FIFO"
+
 
 # environment
 # ENV_STRONG_TEST_COUNT = "STRONG_TEST_COUNT"
@@ -197,3 +230,13 @@ PAGERANK_FLD = "pagerank_fea"
 SVR_QUEUE_NAME = "rag_flow_svr_queue"
 SVR_CONSUMER_GROUP_NAME = "rag_flow_svr_task_broker"
 TAG_FLD = "tag_feas"
+
+
+MINERU_ENV_KEYS = ["MINERU_APISERVER", "MINERU_OUTPUT_DIR", "MINERU_BACKEND", "MINERU_SERVER_URL", "MINERU_DELETE_OUTPUT"]
+MINERU_DEFAULT_CONFIG = {
+    "MINERU_APISERVER": "",
+    "MINERU_OUTPUT_DIR": "",
+    "MINERU_BACKEND": "pipeline",
+    "MINERU_SERVER_URL": "",
+    "MINERU_DELETE_OUTPUT": 1,
+}

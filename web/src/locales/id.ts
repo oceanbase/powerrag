@@ -163,6 +163,9 @@ export default {
       html4excelTip: `Gunakan bersama dengan metode pemotongan General. Ketika dinonaktifkan, file spreadsheet (XLSX, XLS (Excel 97-2003)) akan dianalisis baris demi baris menjadi pasangan kunci-nilai. Ketika diaktifkan, file spreadsheet akan dianalisis menjadi tabel HTML. Jika tabel asli memiliki lebih dari 12 baris, sistem akan secara otomatis membagi menjadi beberapa tabel HTML setiap 12 baris. Untuk informasi lebih lanjut, lihat https://ragflow.io/docs/dev/enable_excel2html.`,
     },
     knowledgeConfiguration: {
+      imageTableContextWindow: 'Jendela konteks gambar & tabel',
+      imageTableContextWindowTip:
+        'Mengambil N token teks di atas dan di bawah gambar dan tabel untuk memberikan konteks latar yang lebih kaya.',
       titleDescription:
         'Perbarui detail basis pengetahuan Anda terutama metode parsing di sini.',
       name: 'Nama basis pengetahuan',
@@ -516,6 +519,10 @@ export default {
         'Untuk pengguna Tiongkok, tidak perlu diisi atau gunakan https://dashscope.aliyuncs.com/compatible-mode/v1. Untuk pengguna internasional, gunakan https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
       tongyiBaseUrlPlaceholder:
         '(Hanya untuk pengguna internasional, silakan lihat tip)',
+      minimaxBaseUrlTip:
+        'Hanya untuk pengguna internasional: gunakan https://api.minimax.io/v1.',
+      minimaxBaseUrlPlaceholder:
+        '(Hanya untuk pengguna internasional, isi https://api.minimax.io/v1)',
       modify: 'Ubah',
       systemModelSettings: 'Tetapkan model default',
       chatModel: 'Model Obrolan',
@@ -766,6 +773,27 @@ export default {
       searXNG: 'SearXNG',
       searXNGDescription:
         'Komponen yang melakukan pencarian menggunakan URL instance SearXNG yang Anda berikan. Spesifikasikan TopN dan URL instance.',
+      pdfGenerator: 'Pembuat Dokumen',
+      pDFGenerator: 'Pembuat Dokumen',
+      pdfGeneratorDescription: `Komponen yang menghasilkan dokumen (PDF, DOCX, TXT) dari konten berformat markdown dengan gaya yang dapat disesuaikan, gambar, dan tabel. Mendukung: **tebal**, *miring*, # judul, - daftar, tabel dengan sintaks |.`,
+      pDFGeneratorDescription: `Komponen yang menghasilkan dokumen (PDF, DOCX, TXT) dari konten berformat markdown dengan gaya yang dapat disesuaikan, gambar, dan tabel. Mendukung: **tebal**, *miring*, # judul, - daftar, tabel dengan sintaks |.`,
+      subtitle: 'Subjudul',
+      logoImage: 'Gambar Logo',
+      logoPosition: 'Posisi Logo',
+      logoWidth: 'Lebar Logo',
+      logoHeight: 'Tinggi Logo',
+      fontFamily: 'Keluarga Font',
+      fontSize: 'Ukuran Font',
+      titleFontSize: 'Ukuran Font Judul',
+      pageSize: 'Ukuran Halaman',
+      orientation: 'Orientasi',
+      marginTop: 'Margin Atas',
+      marginBottom: 'Margin Bawah',
+      filename: 'Nama File',
+      outputDirectory: 'Direktori Output',
+      addPageNumbers: 'Tambahkan Nomor Halaman',
+      addTimestamp: 'Tambahkan Timestamp',
+      watermarkText: 'Teks Watermark',
       channel: 'Saluran',
       channelTip: `Lakukan pencarian teks atau pencarian berita pada input komponen`,
       text: 'Teks',

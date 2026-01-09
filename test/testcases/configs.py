@@ -42,7 +42,10 @@ DEFAULT_PARSER_CONFIG = {
     "auto_keywords": 0,
     "auto_questions": 0,
     "html4excel": False,
+    "image_context_size": 0,
+    "table_context_size": 0,
     "topn_tags": 3,
+    "llm_id": "glm-4-flash@ZHIPU-AI",
     "raptor": {
         "use_raptor": True,
         "prompt": "Please summarize the following paragraphs. Be careful with the numbers, do not make things up. Paragraphs as following:\n      {cluster_content}\nThe above is the content you need to summarize.",
