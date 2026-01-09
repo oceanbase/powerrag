@@ -222,13 +222,13 @@ def construct_json_result(code: RetCode = RetCode.SUCCESS, message="success", da
 def token_required(func):
     def get_tenant_id(**kwargs):
         if os.environ.get("DISABLE_SDK"):
-            return False, get_json_result(data=False, message="`Authorization` can't be empty")
+            return False, get_json_result(data=False, message="`Authorization` can't be empty", code=RetCode.AUTHENTICATION_ERROR)
         authorization_str = request.headers.get("Authorization")
         if not authorization_str:
-            return False, get_json_result(data=False, message="`Authorization` can't be empty")
+            return False, get_json_result(data=False, message="`Authorization` can't be empty", code=RetCode.AUTHENTICATION_ERROR)
         authorization_list = authorization_str.split()
         if len(authorization_list) < 2:
-            return False, get_json_result(data=False, message="Please check your authorization format.")
+            return False, get_json_result(data=False, message="Please check your authorization format.", code=RetCode.AUTHENTICATION_ERROR)
         token = authorization_list[1]
         objs = APIToken.query(token=token)
         if not objs:

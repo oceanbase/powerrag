@@ -194,7 +194,7 @@ async def upload_with_meta(dataset_id, tenant_id):
     docs = req.get("docs")
     if not docs:
         return get_error_data_result(
-            message="No docs in request params!", code=settings.RetCode.ARGUMENT_ERROR
+            message="No docs in request params!", code=RetCode.ARGUMENT_ERROR
         )
     parse = req.get("parse", True)
 
@@ -222,7 +222,7 @@ async def upload_with_meta(dataset_id, tenant_id):
         ))
     err, files = FileService.upload_document(kb, file_objs, tenant_id)
     if err:
-        return get_result(message="\n".join(err), code=settings.RetCode.SERVER_ERROR)
+        return get_result(message="\n".join(err), code=RetCode.SERVER_ERROR)
     # rename key's name
     renamed_doc_list = []
     docs_to_parse = []
