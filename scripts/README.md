@@ -1,6 +1,6 @@
 # RAGFlow 脚本使用指南
 
-本目录包含 RAGFlow 的运维部署脚本和工具脚本，用于管理服务部署和数据处理任务。
+本目录包含 RAGFlow 的运维部署脚本，用于管理服务部署。
 
 ## 脚本说明
 
@@ -62,17 +62,6 @@
 
 **兼容性：**
 - 不再提供单独的 `start-web/stop-web` 命令；前端 nginx（静态 + 反代 API）随 `webserver` 一起启动。
-
-### 2. `tools.sh` - 工具脚本
-
-用于执行数据上传和处理相关的工具任务。
-
-**支持的命令：**
-- `upload-wiki` - 上传 Wiki JSON 数据（后台运行，支持断点续传）
-- `stop-upload-wiki` - 停止 Wiki JSON 上传任务
-- `reparse-failed` - 重新解析指定数据集中失败的文档
-- `stop-reparse-failed` - 停止重新解析失败文档任务
-- `status` - 查看工具任务状态
 
 ## 快速开始
 
@@ -139,29 +128,6 @@
 ```bash
 ./scripts/deploy.sh start --enable-mcpserver --enable-adminserver --enable-powerragserver
 ./scripts/deploy.sh start --enable-powerragserver --powerrag-port=6000
-```
-
-### 工具脚本（tools.sh）
-
-```bash
-# 上传 Wiki JSON 数据
-./scripts/tools.sh upload-wiki
-
-# 使用自定义参数上传
-API_KEY=xxx HOST=xxx WIKI_DATA_DIR=xxx BATCH_SIZE=1000 ./scripts/tools.sh upload-wiki
-WIKI_ENABLE_RESUME=false ./scripts/tools.sh upload-wiki
-
-# 停止上传任务
-./scripts/tools.sh stop-upload-wiki
-
-# 重新解析失败的文档（需要设置数据集 ID）
-API_KEY=xxx HOST=xxx DATASET_ID=xxx BATCH_SIZE=1000 ./scripts/tools.sh reparse-failed
-
-# 停止重新解析任务
-./scripts/tools.sh stop-reparse-failed
-
-# 查看工具任务状态
-./scripts/tools.sh status
 ```
 
 ## 日志与 PID
