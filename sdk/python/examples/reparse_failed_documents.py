@@ -118,7 +118,7 @@ Examples:
     parser.add_argument(
         '-b', '--batch-size',
         type=int,
-        default=50,
+        default=1000,
         help='Batch size for reparsing documents (default: 50)'
     )
     parser.add_argument(
