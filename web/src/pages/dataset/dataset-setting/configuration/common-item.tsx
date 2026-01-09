@@ -1,4 +1,14 @@
-import { SelectWithSearch } from '@/components/originui/select-with-search';
+import {
+  FormFieldConfig,
+  FormFieldType,
+  RenderField,
+} from '@/components/dynamic-form';
+import {
+  SelectWithSearch,
+  SelectWithSearchFlagOptionType,
+} from '@/components/originui/select-with-search';
+import { SliderInputFormField } from '@/components/slider-input-form-field';
+import { Button } from '@/components/ui/button';
 import {
   FormControl,
   FormField,
@@ -9,10 +19,26 @@ import {
 import { Radio } from '@/components/ui/radio';
 import { Spin } from '@/components/ui/spin';
 import { Switch } from '@/components/ui/switch';
+import { LlmModelType } from '@/constants/knowledge';
 import { useTranslate } from '@/hooks/common-hooks';
+import { useComposeLlmOptionsByModelTypes } from '@/hooks/use-llm-request';
 import { cn } from '@/lib/utils';
-import { useMemo, useState } from 'react';
-import { useFormContext } from 'react-hook-form';
+import { t } from 'i18next';
+import { Settings } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ControllerRenderProps,
+  FieldValues,
+  useFormContext,
+} from 'react-hook-form';
+import { useLocation } from 'umi';
+import {
+  MetadataType,
+  useManageMetadata,
+  util,
+} from '../../components/metedata/hooks/use-manage-modal';
+import { IMetaDataReturnJSONSettings } from '../../components/metedata/interface';
+import { ManageMetadataModal } from '../../components/metedata/manage-modal';
 import {
   useHandleKbEmbedding,
   useHasParsedDocument,
@@ -22,6 +48,8 @@ import {
 interface IProps {
   line?: 1 | 2;
   isEdit?: boolean;
+  label?: string;
+  name?: string;
 }
 export function ChunkMethodItem(props: IProps) {
   const { line } = props;
@@ -65,17 +93,63 @@ export function ChunkMethodItem(props: IProps) {
     />
   );
 }
-export function EmbeddingModelItem({ line = 1, isEdit }: IProps) {
+
+export const EmbeddingSelect = ({
+  isEdit,
+  field,
+  name,
+  disabled = false,
+}: {
+  isEdit: boolean;
+  field: FieldValues;
+  name?: string;
+  disabled?: boolean;
+}) => {
   const { t } = useTranslate('knowledgeConfiguration');
   const form = useFormContext();
   const embeddingModelOptions = useSelectEmbeddingModelOptions();
   const { handleChange } = useHandleKbEmbedding();
-  const disabled = useHasParsedDocument(isEdit);
+
   const oldValue = useMemo(() => {
-    const embdStr = form.getValues('embd_id');
+    const embdStr = form.getValues(name || 'embd_id');
     return embdStr || '';
   }, [form]);
   const [loading, setLoading] = useState(false);
+  return (
+    <Spin
+      spinning={loading}
+      className={cn(' rounded-lg after:bg-bg-base', {
+        'opacity-20': loading,
+      })}
+    >
+      <SelectWithSearch
+        onChange={async (value) => {
+          field.onChange(value);
+          if (isEdit && disabled) {
+            setLoading(true);
+            const res = await handleChange({
+              embed_id: value,
+              // callback: field.onChange,
+            });
+            if (res.code !== 0) {
+              field.onChange(oldValue);
+            }
+            setLoading(false);
+          }
+        }}
+        disabled={disabled && !isEdit}
+        value={field.value}
+        options={embeddingModelOptions}
+        placeholder={t('embeddingModelPlaceholder')}
+      />
+    </Spin>
+  );
+};
+
+export function EmbeddingModelItem({ line = 1, isEdit }: IProps) {
+  const { t } = useTranslate('knowledgeConfiguration');
+  const form = useFormContext();
+  const disabled = useHasParsedDocument(isEdit);
   return (
     <>
       <FormField
@@ -102,33 +176,11 @@ export function EmbeddingModelItem({ line = 1, isEdit }: IProps) {
                 className={cn('text-muted-foreground', { 'w-3/4': line === 1 })}
               >
                 <FormControl>
-                  <Spin
-                    spinning={loading}
-                    className={cn(' rounded-lg after:bg-bg-base', {
-                      'opacity-20': loading,
-                    })}
-                  >
-                    <SelectWithSearch
-                      onChange={async (value) => {
-                        field.onChange(value);
-                        if (isEdit && disabled) {
-                          setLoading(true);
-                          const res = await handleChange({
-                            embed_id: value,
-                            callback: field.onChange,
-                          });
-                          if (res.code !== 0) {
-                            field.onChange(oldValue);
-                          }
-                          setLoading(false);
-                        }
-                      }}
-                      value={field.value}
-                      options={embeddingModelOptions}
-                      placeholder={t('embeddingModelPlaceholder')}
-                      triggerClassName="!bg-bg-base"
-                    />
-                  </Spin>
+                  <EmbeddingSelect
+                    isEdit={!!isEdit}
+                    field={field}
+                    disabled={disabled}
+                  ></EmbeddingSelect>
                 </FormControl>
               </div>
             </div>
@@ -264,5 +316,228 @@ export function EnableTocToggle() {
         </FormItem>
       )}
     />
+  );
+}
+
+export function ImageContextWindow() {
+  const { t } = useTranslate('knowledgeConfiguration');
+  const form = useFormContext();
+
+  return (
+    <FormField
+      control={form.control}
+      name="parser_config.image_table_context_window"
+      render={({ field }) => (
+        <FormItem>
+          <FormControl>
+            <SliderInputFormField
+              {...field}
+              label={t('imageTableContextWindow')}
+              tooltip={t('imageTableContextWindowTip')}
+              defaultValue={0}
+              min={0}
+              max={256}
+            />
+          </FormControl>
+          <div className="flex pt-1">
+            <div className="w-1/4"></div>
+            <FormMessage />
+          </div>
+        </FormItem>
+      )}
+    />
+  );
+}
+
+export function OverlappedPercent() {
+  return (
+    <SliderInputFormField
+      percentage={true}
+      name="parser_config.overlapped_percent"
+      label={t('knowledgeConfiguration.overlappedPercent')}
+      max={0.3}
+      step={0.01}
+    ></SliderInputFormField>
+  );
+}
+
+export function AutoMetadata({
+  type = MetadataType.Setting,
+  otherData,
+}: {
+  type?: MetadataType;
+  otherData?: Record<string, any>;
+}) {
+  // get metadata field
+  const location = useLocation();
+  const form = useFormContext();
+  const {
+    manageMetadataVisible,
+    showManageMetadataModal,
+    hideManageMetadataModal,
+    tableData,
+    config: metadataConfig,
+  } = useManageMetadata();
+
+  const handleClickOpenMetadata = useCallback(() => {
+    const metadata = form.getValues('parser_config.metadata');
+    const tableMetaData = util.metaDataSettingJSONToMetaDataTableData(metadata);
+    showManageMetadataModal({
+      metadata: tableMetaData,
+      isCanAdd: true,
+      type: type,
+      record: otherData,
+    });
+  }, [form, otherData, showManageMetadataModal, type]);
+
+  useEffect(() => {
+    const locationState = location.state as
+      | { openMetadata?: boolean }
+      | undefined;
+    if (locationState?.openMetadata) {
+      setTimeout(() => {
+        handleClickOpenMetadata();
+      }, 100);
+      locationState.openMetadata = false;
+    }
+  }, [location, handleClickOpenMetadata]);
+
+  const autoMetadataField: FormFieldConfig = {
+    name: 'parser_config.enable_metadata',
+    label: t('knowledgeConfiguration.autoMetadata'),
+    type: FormFieldType.Custom,
+    horizontal: true,
+    defaultValue: true,
+    tooltip: t('knowledgeConfiguration.autoMetadataTip'),
+    render: (fieldProps: ControllerRenderProps) => (
+      <div className="flex items-center justify-between">
+        <Button type="button" variant="ghost" onClick={handleClickOpenMetadata}>
+          <div className="flex items-center gap-2">
+            <Settings />
+            {t('knowledgeConfiguration.settings')}
+          </div>
+        </Button>
+        <Switch
+          checked={fieldProps.value}
+          onCheckedChange={fieldProps.onChange}
+        />
+      </div>
+    ),
+  };
+
+  const handleSaveMetadata = (data?: IMetaDataReturnJSONSettings) => {
+    form.setValue('parser_config.metadata', data || []);
+  };
+  return (
+    <>
+      <RenderField field={autoMetadataField} />
+      {manageMetadataVisible && (
+        <ManageMetadataModal
+          title={
+            metadataConfig.title || (
+              <div className="flex flex-col gap-2">
+                <div className="text-base font-normal">
+                  {t('knowledgeDetails.metadata.metadataGenerationSettings')}
+                </div>
+                <div className="text-sm text-text-secondary">
+                  {t('knowledgeDetails.metadata.changesAffectNewParses')}
+                </div>
+              </div>
+            )
+          }
+          visible={manageMetadataVisible}
+          hideModal={hideManageMetadataModal}
+          // selectedRowKeys={selectedRowKeys}
+          tableData={tableData}
+          isCanAdd={metadataConfig.isCanAdd}
+          isDeleteSingleValue={metadataConfig.isDeleteSingleValue}
+          type={metadataConfig.type}
+          otherData={metadataConfig.record}
+          isShowDescription={true}
+          isShowValueSwitch={true}
+          isVerticalShowValue={false}
+          success={(data?: IMetaDataReturnJSONSettings) => {
+            handleSaveMetadata(data);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+export const LLMSelect = ({
+  isEdit,
+  field,
+  disabled = false,
+}: {
+  isEdit: boolean;
+  field: FieldValues;
+  name?: string;
+  disabled?: boolean;
+}) => {
+  const { t } = useTranslate('knowledgeConfiguration');
+  const modelOptions = useComposeLlmOptionsByModelTypes([
+    LlmModelType.Chat,
+    LlmModelType.Image2text,
+  ]);
+  return (
+    <SelectWithSearch
+      onChange={async (value) => {
+        field.onChange(value);
+      }}
+      disabled={disabled && !isEdit}
+      value={field.value}
+      options={modelOptions as SelectWithSearchFlagOptionType[]}
+      placeholder={t('embeddingModelPlaceholder')}
+    />
+  );
+};
+
+export function LLMModelItem({ line = 1, isEdit, label, name }: IProps) {
+  const { t } = useTranslate('knowledgeConfiguration');
+  const form = useFormContext();
+  // const disabled = useHasParsedDocument(isEdit);
+  return (
+    <>
+      <FormField
+        control={form.control}
+        name={name ?? 'llm_id'}
+        render={({ field }) => (
+          <FormItem className={cn(' items-center space-y-0 ')}>
+            <div
+              className={cn('flex', {
+                ' items-center': line === 1,
+                'flex-col gap-1': line === 2,
+              })}
+            >
+              <FormLabel
+                required
+                tooltip={t('globalIndexModelTip')}
+                className={cn('text-sm  whitespace-wrap ', {
+                  'w-1/4': line === 1,
+                })}
+              >
+                {label ?? t('llmModel')}
+              </FormLabel>
+              <div
+                className={cn('text-text-secondary', { 'w-3/4': line === 1 })}
+              >
+                <FormControl>
+                  <LLMSelect
+                    isEdit={!!isEdit}
+                    field={field}
+                    disabled={false}
+                  ></LLMSelect>
+                </FormControl>
+              </div>
+            </div>
+            <div className="flex pt-1">
+              <div className={line === 1 ? 'w-1/4' : ''}></div>
+              <FormMessage />
+            </div>
+          </FormItem>
+        )}
+      />
+    </>
   );
 }

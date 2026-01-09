@@ -1,0 +1,56 @@
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "powerrag-sdk"
+version = "0.0.0"  # Version will be set automatically from GitHub release tag
+description = "A Python SDK for PowerRAG API, providing easy-to-use interfaces for knowledge base management, document processing, chunking, extraction, RAPTOR, knowledge graph, and retrieval."
+authors = ["OceanBase Team <contact@oceanbase.com>"]
+license = "Apache-2.0"
+readme = "README.md"
+homepage = "https://github.com/oceanbase/powerrag"
+repository = "https://github.com/oceanbase/powerrag"
+documentation = "https://github.com/oceanbase/powerrag/docs"
+keywords = ["powerrag", "rag", "llm", "sdk", "knowledge-base", "document-processing"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+# Package configuration
+# IMPORTANT: Build must be run from repository root (not from powerrag/sdk/)
+# This ensures the package path 'powerrag.sdk' is correctly resolved
+# Build workflow: GitHub Action copies this file to root and runs poetry build
+# Import path: from powerrag.sdk import PowerRAGClient
+packages = [
+    { include = "powerrag/sdk" },
+]
+
+# Exclude patterns (Poetry automatically excludes __pycache__, *.pyc, tests, etc.)
+exclude = [
+    "powerrag/sdk/tests",
+    "powerrag/sdk/**/__pycache__",
+    "powerrag/sdk/**/*.pyc",
+]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<4.0"
+requests = ">=2.28.0"
+typing-extensions = { version = ">=4.0.0", python = "<3.11" }
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.3.5"
+requests-toolbelt = ">=1.0.0"
+
+[tool.poetry.urls]
+"Bug Tracker" = "https://github.com/oceanbase/powerrag/issues"
+"Documentation" = "https://github.com/oceanbase/powerrag/docs"
+"Source Code" = "https://github.com/oceanbase/powerrag"

@@ -59,54 +59,31 @@ export function SavingButton() {
         (async () => {
           try {
             let beValid = await form.trigger();
+            if (!beValid) {
+              const errors = form.formState.errors;
+              console.error('Validation errors:', errors);
+            }
             if (beValid) {
               form.handleSubmit(async (values) => {
-                console.log(
-                  'saveKnowledgeConfiguration before cleanup: ',
-                  values,
-                );
+                console.log('saveKnowledgeConfiguration: ', values);
                 delete values['parseType'];
                 // delete values['avatar'];
-
-                if (values.parser_config) {
-                  // Remove pdf_parser field - PDF parser is stored in layout_recognize
-                  delete values.parser_config.pdf_parser;
-
-                  // Handle Title parser
-                  if (values.parser_id === 'title') {
-                    // Ensure title_level is included - get it from form if not in values
-                    if (!values.parser_config.title_level) {
-                      const titleLevel = form.getValues(
-                        'parser_config.title_level',
-                      );
-                      if (titleLevel) {
-                        values.parser_config.title_level = titleLevel;
-                      }
-                    }
-                    console.log(
-                      'Title parser config after cleanup:',
-                      values.parser_config,
-                    );
-                    console.log(
-                      'title_level:',
-                      values.parser_config.title_level,
-                    );
-                  }
-
-                  // Handle Regex parser - remove pdf_parser and title_level
-                  if (values.parser_id === 'regex') {
-                    delete values.parser_config.title_level;
-                    console.log(
-                      'Regex parser config after cleanup:',
-                      values.parser_config,
-                    );
-                  }
-                }
-
-                console.log('Final save data:', values);
                 await saveKnowledgeConfiguration({
                   kb_id,
                   ...values,
+                  parser_config: {
+                    ...values.parser_config,
+                    image_table_context_window:
+                      values.parser_config.image_table_context_window,
+                    image_context_size:
+                      values.parser_config.image_table_context_window,
+                    table_context_size:
+                      values.parser_config.image_table_context_window,
+                    // Unset children delimiter if this option is not enabled
+                    children_delimiter: values.parser_config.enable_children
+                      ? values.parser_config.children_delimiter
+                      : '',
+                  },
                 });
               })();
             }

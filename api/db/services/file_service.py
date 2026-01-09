@@ -13,10 +13,15 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
+import asyncio
+import base64
 import logging
 import re
+import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Union
 
 from peewee import fn
 
@@ -89,13 +94,13 @@ class FileService(CommonService):
     @classmethod
     @DB.connection_context()
     def get_kb_id_by_file_id(cls, file_id):
-        # Get knowledge base IDs associated with a file
+        # Get dataset IDs associated with a file
         # Args:
         #     file_id: File ID
         # Returns:
-        #     List of dictionaries containing knowledge base IDs and names
+        #     List of dictionaries containing dataset IDs and names
         kbs = (
-            cls.model.select(*[Knowledgebase.id, Knowledgebase.name])
+            cls.model.select(*[Knowledgebase.id, Knowledgebase.name, File2Document.document_id])
             .join(File2Document, on=(File2Document.file_id == file_id))
             .join(Document, on=(File2Document.document_id == Document.id))
             .join(Knowledgebase, on=(Knowledgebase.id == Document.kb_id))
@@ -105,7 +110,7 @@ class FileService(CommonService):
             return []
         kbs_info_list = []
         for kb in list(kbs.dicts()):
-            kbs_info_list.append({"kb_id": kb["id"], "kb_name": kb["name"]})
+            kbs_info_list.append({"kb_id": kb["id"], "kb_name": kb["name"], "document_id": kb["document_id"]})
         return kbs_info_list
 
     @classmethod
@@ -242,7 +247,7 @@ class FileService(CommonService):
     @classmethod
     @DB.connection_context()
     def get_kb_folder(cls, tenant_id):
-        # Get knowledge base folder for tenant
+        # Get dataset folder for tenant
         # Args:
         #     tenant_id: Tenant ID
         # Returns:
@@ -258,7 +263,7 @@ class FileService(CommonService):
     @classmethod
     @DB.connection_context()
     def new_a_file_from_kb(cls, tenant_id, name, parent_id, ty=FileType.FOLDER.value, size=0, location=""):
-        # Create a new file from knowledge base
+        # Create a new file from dataset
         # Args:
         #     tenant_id: Tenant ID
         #     name: File name
@@ -287,7 +292,7 @@ class FileService(CommonService):
     @classmethod
     @DB.connection_context()
     def init_knowledgebase_docs(cls, root_id, tenant_id):
-        # Initialize knowledge base documents
+        # Initialize dataset documents
         # Args:
         #     root_id: Root folder ID
         #     tenant_id: Tenant ID
@@ -520,7 +525,7 @@ class FileService(CommonService):
         if img_base64 and file_type == FileType.VISUAL.value:
             return GptV4.image2base64(blob)
         cks = FACTORY.get(FileService.get_parser(filename_type(filename), filename, ""), naive).chunk(filename, blob, **kwargs)
-        return "\n".join([ck["content_with_weight"] for ck in cks])
+        return f"\n -----------------\nFile: {filename}\nContent as following: \n" + "\n".join([ck["content_with_weight"] for ck in cks])
 
     @staticmethod
     def get_parser(doc_type, filename, default):
@@ -588,3 +593,80 @@ class FileService(CommonService):
                 errors += str(e)
 
         return errors
+
+    @staticmethod
+    def upload_info(user_id, file, url: str|None=None):
+        def structured(filename, filetype, blob, content_type):
+            nonlocal user_id
+            if filetype == FileType.PDF.value:
+                blob = read_potential_broken_pdf(blob)
+
+            location = get_uuid()
+            FileService.put_blob(user_id, location, blob)
+
+            return {
+                "id": location,
+                "name": filename,
+                "size": sys.getsizeof(blob),
+                "extension": filename.split(".")[-1].lower(),
+                "mime_type": content_type,
+                "created_by": user_id,
+                "created_at": time.time(),
+                "preview_url": None
+            }
+
+        if url:
+            from crawl4ai import (
+                AsyncWebCrawler,
+                BrowserConfig,
+                CrawlerRunConfig,
+                DefaultMarkdownGenerator,
+                PruningContentFilter,
+                CrawlResult
+            )
+            filename = re.sub(r"\?.*", "", url.split("/")[-1])
+            async def adownload():
+                browser_config = BrowserConfig(
+                    headless=True,
+                    verbose=False,
+                )
+                async with AsyncWebCrawler(config=browser_config) as crawler:
+                    crawler_config = CrawlerRunConfig(
+                        markdown_generator=DefaultMarkdownGenerator(
+                            content_filter=PruningContentFilter()
+                        ),
+                        pdf=True,
+                        screenshot=False
+                    )
+                    result: CrawlResult = await crawler.arun(
+                        url=url,
+                        config=crawler_config
+                    )
+                    return result
+            page = asyncio.run(adownload())
+            if page.pdf:
+                if filename.split(".")[-1].lower() != "pdf":
+                    filename += ".pdf"
+                return structured(filename, "pdf", page.pdf, page.response_headers["content-type"])
+
+            return structured(filename, "html", str(page.markdown).encode("utf-8"), page.response_headers["content-type"], user_id)
+
+        DocumentService.check_doc_health(user_id, file.filename)
+        return structured(file.filename, filename_type(file.filename), file.read(), file.content_type)
+
+    @staticmethod
+    def get_files(files: Union[None, list[dict]]) -> list[str]:
+        if not files:
+            return  []
+        def image_to_base64(file):
+            return "data:{};base64,{}".format(file["mime_type"],
+                                        base64.b64encode(FileService.get_blob(file["created_by"], file["id"])).decode("utf-8"))
+        exe = ThreadPoolExecutor(max_workers=5)
+        threads = []
+        for file in files:
+            if file["mime_type"].find("image") >=0:
+                threads.append(exe.submit(image_to_base64, file))
+                continue
+            threads.append(exe.submit(FileService.parse, file["name"], FileService.get_blob(file["created_by"], file["id"]), True, file["created_by"]))
+        return [th.result() for th in threads]
+

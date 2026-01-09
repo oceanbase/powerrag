@@ -13,6 +13,7 @@ export const formSchema = z
     // avatar: z.instanceof(File),
     avatar: z.any().nullish(),
     permission: z.string().optional(),
+    language: z.string().optional(),
     parser_id: z.string(),
     pipeline_id: z.string().optional(),
     pipeline_name: z.string().optional(),
@@ -21,18 +22,23 @@ export const formSchema = z
     parser_config: z
       .object({
         layout_recognize: z.string(),
-        pdf_parser: z.string().optional(),
         chunk_token_num: z.number(),
         delimiter: z.string(),
-        regex_pattern: z.string().optional(),
-        title_level: z.number().optional(),
-        min_chunk_tokens: z.number().optional(),
+        enable_children: z.boolean(),
+        children_delimiter: z.string(),
         auto_keywords: z.number().optional(),
         auto_questions: z.number().optional(),
         html4excel: z.boolean(),
         tag_kb_ids: z.array(z.string()).nullish(),
         topn_tags: z.number().optional(),
         toc_extraction: z.boolean().optional(),
+        image_table_context_window: z.number().optional(),
+        overlapped_percent: z.number().optional(),
+        // MinerU-specific options
+        mineru_parse_method: z.enum(['auto', 'txt', 'ocr']).optional(),
+        mineru_formula_enable: z.boolean().optional(),
+        mineru_table_enable: z.boolean().optional(),
+        mineru_lang: z.string().optional(),
         raptor: z
           .object({
             use_raptor: z.boolean().optional(),
@@ -78,6 +84,19 @@ export const formSchema = z
               path: ['entity_types'],
             },
           ),
+        metadata: z
+          .array(
+            z
+              .object({
+                key: z.string().optional(),
+                description: z.string().optional(),
+                enum: z.array(z.string().optional()).optional(),
+              })
+              .optional(),
+          )
+          .optional(),
+        enable_metadata: z.boolean().optional(),
+        llm_id: z.string().min(1, { message: 'Indexing model is required' }),
       })
       .optional(),
     pagerank: z.number(),

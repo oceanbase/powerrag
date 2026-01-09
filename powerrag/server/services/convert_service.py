@@ -281,8 +281,10 @@ class PowerRAGConvertService:
         filename = config.get('filename', 'document.html')
         
         try:
+            # According to https://gotenberg.dev/docs/routes#html-file-into-pdf-route
+            # The file MUST be named "index.html"
             url = f"{self.gotenberg_url}/forms/chromium/convert/html"
-            files = {'files': (filename, io.BytesIO(binary))}
+            files = {'files': ('index.html', io.BytesIO(binary))}
             
             logger.info(f"Converting HTML document to PDF via Gotenberg: {filename}")
             response = requests.post(url, files=files, timeout=60)

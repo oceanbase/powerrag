@@ -14,6 +14,7 @@
 #  limitations under the License.
 #
 from agent.component.fillup import UserFillUpParam, UserFillUp
+from api.db.services.file_service import FileService
 
 
 class BeginParam(UserFillUpParam):
@@ -27,7 +28,7 @@ class BeginParam(UserFillUpParam):
         self.prologue = "Hi! I'm your smart assistant. What can I do for you?"
 
     def check(self):
-        self.check_valid_value(self.mode, "The 'mode' should be either `conversational` or `task`", ["conversational", "task"])
+        self.check_valid_value(self.mode, "The 'mode' should be either `conversational` or `task`", ["conversational", "task","Webhook"])
 
     def get_input_form(self) -> dict[str, dict]:
         return getattr(self, "inputs")
@@ -48,7 +49,7 @@ class Begin(UserFillUp):
                 if v.get("optional") and v.get("value", None) is None:
                     v = None
                 else:
-                    v = self._canvas.get_files([v["value"]])
+                    v = FileService.get_files([v["value"]])
             else:
                 v = v.get("value")
             self.set_output(k, v)

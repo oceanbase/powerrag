@@ -13,23 +13,21 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
+import logging
 import os
 import sys
-import logging
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from quart import Blueprint, Quart, request, g, current_app, session
-from werkzeug.wrappers.request import Request
 from flasgger import Swagger
 from itsdangerous.url_safe import URLSafeTimedSerializer as Serializer
 from quart_cors import cors
 from common.constants import StatusEnum
-from api.db.db_models import close_connection
+from api.db.db_models import close_connection, APIToken
 from api.db.services import UserService
 from api.utils.json_encode import CustomJSONEncoder
 from api.utils import commands
 
-from flask_mail import Mail
 from quart_auth import Unauthorized
 from common import settings
 from api.utils.api_utils import server_error_response
@@ -40,11 +38,8 @@ settings.init_settings()
 
 __all__ = ["app"]
 
-Request.json = property(lambda self: self.get_json(force=True, silent=True))
-
 app = Quart(__name__)
 app = cors(app, allow_origin="*")
-smtp_mail_server = Mail()
 
 # Add this at the beginning of your file to configure Swagger UI
 swagger_config = {
@@ -82,6 +77,11 @@ app.url_map.strict_slashes = False
 app.json_encoder = CustomJSONEncoder
 app.errorhandler(Exception)(server_error_response)
 
+# Configure Quart timeouts for slow LLM responses (e.g., local Ollama on CPU)
+# Default Quart timeouts are 60 seconds which is too short for many LLM backends
+app.config["RESPONSE_TIMEOUT"] = int(os.environ.get("QUART_RESPONSE_TIMEOUT", 600))
+app.config["BODY_TIMEOUT"] = int(os.environ.get("QUART_BODY_TIMEOUT", 600))
+
 ## convince for dev and debug
 # app.config["LOGIN_DISABLED"] = True
 app.config["SESSION_PERMANENT"] = False
@@ -102,12 +102,13 @@ from werkzeug.local import LocalProxy
 T = TypeVar("T")
 P = ParamSpec("P")
 
+
 def _load_user():
     jwt = Serializer(secret_key=settings.SECRET_KEY)
     authorization = request.headers.get("Authorization")
     g.user = None
     if not authorization:
-        return
+        return None
 
     try:
         access_token = str(jwt.loads(authorization))
@@ -124,6 +125,10 @@ def _load_user():
         user = UserService.query(
             access_token=access_token, status=StatusEnum.VALID.value
         )
+        if not user and len(authorization.split()) == 2:
+            objs = APIToken.query(token=authorization.split()[1])
+            if objs:
+                user = UserService.query(id=objs[0].tenant_id, status=StatusEnum.VALID.value)
         if user:
             if not user[0].access_token or not user[0].access_token.strip():
                 logging.warning(f"User {user[0].email} has empty access_token in database")
@@ -159,7 +164,7 @@ def login_required(func: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]
 
     @wraps(func)
     async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-        if not current_user:# or not session.get("_user_id"):
+        if not current_user:  # or not session.get("_user_id"):
             raise Unauthorized()
         else:
             return await current_app.ensure_async(func)(*args, **kwargs)
@@ -173,7 +178,7 @@ def login_user(user, remember=False, duration=None, force=False, fresh=True):
     user's `is_active` property is ``False``, they will not be logged in
     unless `force` is ``True``.
 
-    This will return ``True`` if the log in attempt succeeds, and ``False`` if
+    This will return ``True`` if the login attempt succeeds, and ``False`` if
     it fails (i.e. because the user is inactive).
 
     :param user: The user object to log in.
@@ -223,6 +228,7 @@ def logout_user():
 
     return True
 
+
 def search_pages_path(page_path):
     app_path_list = [
         path for path in page_path.glob("*_app.py") if not path.name.startswith(".")
@@ -267,6 +273,16 @@ pages_dir = [
 client_urls_prefix = [
     register_page(path) for directory in pages_dir for path in search_pages_path(directory)
 ]
+
+
+@app.errorhandler(404)
+async def not_found(error):
+    error_msg: str = f"The requested URL {request.path} was not found"
+    logging.error(error_msg)
+    return {
+        "error": "Not Found",
+        "message": error_msg,
+    }, 404
 
 
 @app.teardown_request

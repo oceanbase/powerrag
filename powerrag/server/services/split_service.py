@@ -55,7 +55,7 @@ class PowerRAGSplitService:
         """动态导入chunker模块，避免循环导入"""
         global CHUNKER_FACTORY
         if not CHUNKER_FACTORY:
-            global regex_based_chunking, title_based_chunking, smart_based_chunking
+            # 直接引用同一模块中定义的函数
             CHUNKER_FACTORY.update({
                 ParserType.TITLE.value: title_based_chunking,  # PowerRAG Title Chunker
                 ParserType.REGEX.value: regex_based_chunking,  # PowerRAG regex Chunker

@@ -1,4 +1,3 @@
-import { FormContainer } from '@/components/form-container';
 import { Form } from '@/components/ui/form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { memo, useMemo } from 'react';
@@ -16,6 +15,14 @@ import { useWatchFormChange } from './use-watch-form-change';
 
 const FormSchema = z.object({
   query: z.string().optional(),
+  variables: z.array(
+    z.object({
+      variable: z.string().optional(),
+      operator: z.string().optional(),
+      parameter: z.string().or(z.number()).or(z.boolean()).optional(),
+      mode: z.string(),
+    }),
+  ),
   outputs: z.array(z.object({ name: z.string(), value: z.any() })).optional(),
 });
 
@@ -41,12 +48,10 @@ function IterationForm({ node }: INextOperatorForm) {
   return (
     <Form {...form}>
       <FormWrapper>
-        <FormContainer>
-          <QueryVariable
-            name="items_ref"
-            types={ArrayFields as any[]}
-          ></QueryVariable>
-        </FormContainer>
+        <QueryVariable
+          name="items_ref"
+          types={ArrayFields as any[]}
+        ></QueryVariable>
         <DynamicOutput node={node}></DynamicOutput>
         <Output list={outputList}></Output>
       </FormWrapper>

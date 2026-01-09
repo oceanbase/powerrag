@@ -15,6 +15,7 @@
 #
 import logging
 from datetime import datetime
+import os
 from typing import Tuple, List
 
 from anthropic import BaseModel
@@ -103,7 +104,8 @@ class SyncLogsService(CommonService):
             Knowledgebase.avatar.alias("kb_avatar"),
             Connector2Kb.auto_parse,
             cls.model.from_beginning.alias("reindex"),
-            cls.model.status
+            cls.model.status,
+            cls.model.update_time
         ]
         if not connector_id:
             fields.append(Connector.config)
@@ -116,7 +118,11 @@ class SyncLogsService(CommonService):
         if connector_id:
             query = query.where(cls.model.connector_id == connector_id)
         else:
-            interval_expr = SQL("INTERVAL `t2`.`refresh_freq` MINUTE")
+            database_type = os.getenv("DB_TYPE", "mysql")
+            if "postgres" in database_type.lower():
+                interval_expr = SQL("make_interval(mins => t2.refresh_freq)")
+            else:
+                interval_expr = SQL("INTERVAL `t2`.`refresh_freq` MINUTE")
             query = query.where(
                 Connector.input_type == InputType.POLL,
                 Connector.status == TaskStatus.SCHEDULE,
@@ -208,9 +214,21 @@ class SyncLogsService(CommonService):
         err, doc_blob_pairs = FileService.upload_document(kb, files, tenant_id, src)
         errs.extend(err)
 
+        # Create a mapping from filename to metadata for later use
+        metadata_map = {}
+        for d in docs:
+            if d.get("metadata"):
+                filename = d["semantic_identifier"]+(f"{d['extension']}" if d["semantic_identifier"][::-1].find(d['extension'][::-1])<0 else "")
+                metadata_map[filename] = d["metadata"]
+
         kb_table_num_map = {}
         for doc, _ in doc_blob_pairs:
             doc_ids.append(doc["id"])
+            
+            # Set metadata if available for this document
+            if doc["name"] in metadata_map:
+                DocumentService.update_by_id(doc["id"], {"meta_fields": metadata_map[doc["name"]]})
+            
             if not auto_parse or auto_parse == "0":
                 continue
             DocumentService.run(tenant_id, doc, kb_table_num_map)

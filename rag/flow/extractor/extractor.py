@@ -12,15 +12,19 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
-import random
-import logging
 import json
-from copy import deepcopy
+import logging
+import random
 import traceback
+from copy import deepcopy
+
+import langextract as lx
+import xxhash
+
 from agent.component.llm import LLMParam, LLM
 from rag.flow.base import ProcessBase, ProcessParamBase
 from powerrag.server.services.langextract_service import get_langextract_service
-import langextract as lx
+from rag.prompts.generator import run_toc_from_text
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +48,39 @@ class ExtractorParam(ProcessParamBase, LLMParam):
 class Extractor(ProcessBase, LLM):
     component_name = "Extractor"
 
+    async def _build_TOC(self, docs):
+        self.callback(0.2,message="Start to generate table of content ...")
+        docs = sorted(docs, key=lambda d:(
+            d.get("page_num_int", 0)[0] if isinstance(d.get("page_num_int", 0), list) else d.get("page_num_int", 0),
+            d.get("top_int", 0)[0] if isinstance(d.get("top_int", 0), list) else d.get("top_int", 0)
+        ))
+        toc = await run_toc_from_text([d["text"] for d in docs], self.chat_mdl)
+        logging.info("------------ T O C -------------\n"+json.dumps(toc, ensure_ascii=False, indent='  '))
+        ii = 0
+        while ii < len(toc):
+            try:
+                idx = int(toc[ii]["chunk_id"])
+                del toc[ii]["chunk_id"]
+                toc[ii]["ids"] = [docs[idx]["id"]]
+                if ii == len(toc) -1:
+                    break
+                for jj in range(idx+1, int(toc[ii+1]["chunk_id"])+1):
+                    toc[ii]["ids"].append(docs[jj]["id"])
+            except Exception as e:
+                logging.exception(e)
+            ii += 1
+
+        if toc:
+            d = deepcopy(docs[-1])
+            d["doc_id"] = self._canvas._doc_id
+            d["content_with_weight"] = json.dumps(toc, ensure_ascii=False)
+            d["toc_kwd"] = "toc"
+            d["available_int"] = 0
+            d["page_num_int"] = [100000000]
+            d["id"] = xxhash.xxh64((d["content_with_weight"] + str(d["doc_id"])).encode("utf-8", "surrogatepass")).hexdigest()
+            return d
+        return None
+
     async def _invoke(self, **kwargs):
         self.set_output("output_format", "chunks")
         self.callback(random.randint(1, 5) / 100.0, "Start to generate.")
@@ -63,65 +100,61 @@ class Extractor(ProcessBase, LLM):
             await self._invoke_simple(chunks, chunks_key, args)
 
     async def _invoke_simple(self, chunks, chunks_key, args):
-        """Simple LLM-based extraction (original logic)"""
         if chunks:
+            if self._param.field_name == "toc":
+                for ck in chunks:
+                    ck["doc_id"] = self._canvas._doc_id
+                    ck["id"] = xxhash.xxh64((ck["text"] + str(ck["doc_id"])).encode("utf-8")).hexdigest()
+                toc = await self._build_TOC(chunks)
+                chunks.append(toc)
+                self.set_output("chunks", chunks)
+                return
+
             prog = 0
             for i, ck in enumerate(chunks):
                 args[chunks_key] = ck["text"]
                 msg, sys_prompt = self._sys_prompt_and_msg([], args)
                 msg.insert(0, {"role": "system", "content": sys_prompt})
-                ck[self._param.field_name] = self._generate(msg)
-                prog += 1./len(chunks)
-                if i % (len(chunks)//100+1) == 1:
-                    self.callback(prog, f"{i+1} / {len(chunks)}")
+                ck[self._param.field_name] = await self._generate_async(msg)
+                prog += 1. / len(chunks)
+                if i % (len(chunks) // 100 + 1) == 1:
+                    self.callback(prog, f"{i + 1} / {len(chunks)}")
             self.set_output("chunks", chunks)
         else:
             msg, sys_prompt = self._sys_prompt_and_msg([], args)
             msg.insert(0, {"role": "system", "content": sys_prompt})
-            self.set_output("chunks", [{self._param.field_name: self._generate(msg)}])
+            self.set_output("chunks", [{self._param.field_name: await self._generate_async(msg)}])
 
     async def _invoke_langextract(self, chunks, chunks_key, args):
-        """Langextract-based extraction"""
+        """Langextract-based extraction (compat with ob/main)."""
         try:
             langextract_service = get_langextract_service()
             tenant_id = self._canvas.get_tenant_id()
-            llm_id = self._param.llm_id if hasattr(self._param, 'llm_id') and self._param.llm_id else None
-            
-            # Prepare examples for langextract
-            examples = self._param.examples if hasattr(self._param, 'examples') and self._param.examples else []
-            
-            # Prepare model parameters from LLMParam
+            llm_id = self._param.llm_id if hasattr(self._param, "llm_id") and self._param.llm_id else None
+
+            examples = self._param.examples if hasattr(self._param, "examples") and self._param.examples else []
+
             temperature = None
-            if hasattr(self._param, 'temperature') and self._param.temperature > 0:
+            if hasattr(self._param, "temperature") and self._param.temperature > 0:
                 temperature = float(self._param.temperature)
-            
+
             model_parameters = {}
-            if hasattr(self._param, 'top_p') and self._param.top_p > 0:
-                model_parameters['top_p'] = float(self._param.top_p)
-            if hasattr(self._param, 'max_tokens') and self._param.max_tokens > 0:
-                model_parameters['max_tokens'] = int(self._param.max_tokens)
-            if hasattr(self._param, 'presence_penalty') and self._param.presence_penalty > 0:
-                model_parameters['presence_penalty'] = float(self._param.presence_penalty)
-            if hasattr(self._param, 'frequency_penalty') and self._param.frequency_penalty > 0:
-                model_parameters['frequency_penalty'] = float(self._param.frequency_penalty)
-            
+            if hasattr(self._param, "top_p") and self._param.top_p > 0:
+                model_parameters["top_p"] = float(self._param.top_p)
+            if hasattr(self._param, "max_tokens") and self._param.max_tokens > 0:
+                model_parameters["max_tokens"] = int(self._param.max_tokens)
+            if hasattr(self._param, "presence_penalty") and self._param.presence_penalty > 0:
+                model_parameters["presence_penalty"] = float(self._param.presence_penalty)
+            if hasattr(self._param, "frequency_penalty") and self._param.frequency_penalty > 0:
+                model_parameters["frequency_penalty"] = float(self._param.frequency_penalty)
+
             if chunks:
-                # Process chunks in batch using langextract
-                # Convert chunks to lx.data.Document objects
                 documents = []
                 for i, ck in enumerate(chunks):
-                    # Get chunk text - could be "text" or "content_with_weight"
                     chunk_text = ck.get("text", "") or ck.get("content_with_weight", "")
-                    # Get document ID - prefer doc_id, fallback to chunk id, then generate
                     doc_id = f"chunk_{i}"
-                    doc = lx.data.Document(
-                        text=chunk_text,
-                        document_id=doc_id,
-                        additional_context=None  # Can be extended if needed
-                    )
-                    documents.append(doc)
-                
-                # Call synchronous extraction interface
+                    documents.append(lx.data.Document(text=chunk_text, document_id=doc_id, additional_context=None))
+
                 result = langextract_service.extract_sync(
                     text_or_documents=documents,
                     prompt_description=self._param.prompt_description,
@@ -131,10 +164,9 @@ class Extractor(ProcessBase, LLM):
                     temperature=temperature,
                     model_parameters=model_parameters if model_parameters else None,
                     max_char_buffer=1000,
-                    extraction_passes=1
+                    extraction_passes=1,
                 )
-                
-                # Create mapping from doc_id to extractions (result order matches documents order)
+
                 result = list(result)
                 doc_id_to_extractions = {}
                 for i, doc in enumerate(documents):
@@ -142,23 +174,16 @@ class Extractor(ProcessBase, LLM):
                         item = result[i]
                         extractions = item.get("extractions", [])
                         doc_id_to_extractions[doc.document_id] = extractions
-                
-                # Assign results to chunks by doc_id
+
                 for i, ck in enumerate(chunks):
                     doc_id = f"chunk_{i}"
-                    if doc_id in doc_id_to_extractions:
-                        extractions = doc_id_to_extractions[doc_id]
-                        # Format as langextract metadata structure
-                        ck[self._param.field_name] = {"langextract": extractions}
-                    else:
-                        ck[self._param.field_name] = {"langextract": []}
-                
+                    extractions = doc_id_to_extractions.get(doc_id, [])
+                    ck[self._param.field_name] = {"langextract": extractions}
+
                 self.set_output("chunks", chunks)
             else:
-                # No chunks, process single text
                 text = args.get(chunks_key, "")
                 if text:
-                    # Call synchronous extraction interface
                     result = langextract_service.extract_sync(
                         text_or_documents=text,
                         prompt_description=self._param.prompt_description,
@@ -168,9 +193,8 @@ class Extractor(ProcessBase, LLM):
                         temperature=temperature,
                         model_parameters=model_parameters if model_parameters else None,
                         max_char_buffer=1000,
-                        extraction_passes=1
+                        extraction_passes=1,
                     )
-                    
                     extractions = result.get("extractions", []) if isinstance(result, dict) else []
                     self.set_output("chunks", [{self._param.field_name: {"langextract": extractions}}])
                 else:
