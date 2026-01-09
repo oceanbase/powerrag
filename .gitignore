@@ -214,3 +214,4 @@ upload_wiki_json.pid
 setup_tools_venv.sh
 build_tools_bundle.sh
 upload_snapshot.json
+.agent/
