@@ -33,6 +33,7 @@ from quart import (
 )
 
 from peewee import OperationalError
+from werkzeug.exceptions import NotFound
 
 from common.constants import ActiveEnum
 from api.db.db_models import APIToken
@@ -107,7 +108,7 @@ def serialize_for_json(obj):
 
 
 def get_data_error_result(code=RetCode.DATA_ERROR, message="Sorry! Data missing!"):
-    logging.exception(Exception(message))
+    logging.exception(f"Data error: {message}")
     result_dict = {"code": code, "message": message}
     response = {}
     for key, value in result_dict.items():
@@ -556,7 +557,7 @@ def verify_embedding_availability(embd_id: str, tenant_id: str) -> tuple[bool, R
         if not (is_builtin_model or is_tenant_model):
             return False, get_error_argument_result(f"Unauthorized model: <{embd_id}>")
     except OperationalError as e:
-        logging.exception(e)
+        logging.exception(f"Database operation failed: {e}")
         return False, get_error_data_result(message="Database operation failed")
 
     return True, None

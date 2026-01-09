@@ -18,11 +18,15 @@
 # from beartype.claw import beartype_all  # <-- you didn't sign up for this
 # beartype_all(conf=BeartypeConf(violation_type=UserWarning))    # <-- emit warnings from all code
 
+import os
+import logging
+
 from common.log_utils import init_root_logger
 from plugin import GlobalPluginManager
 
-import logging
-import os
+# Initialize logging as early as possible so show_configs() (INFO logs) won't be dropped.
+# deploy.sh sets RAGFLOW_LOG_BASENAME=ragflow_server_<port> for multi-instance runs.
+init_root_logger(os.environ.get("RAGFLOW_LOG_BASENAME", "ragflow_server"))
 import signal
 import sys
 import traceback

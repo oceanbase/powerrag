@@ -29,15 +29,35 @@ function usage() {
     exit 1
 }
 
-ENABLE_WEBSERVER=1 # Default to enable web server
-ENABLE_TASKEXECUTOR=1  # Default to enable task executor
-ENABLE_DATASYNC=1
-ENABLE_MCP_SERVER=0
-ENABLE_ADMIN_SERVER=0 # Default close admin server
-INIT_SUPERUSER_ARGS="" # Default to not initialize superuser
-CONSUMER_NO_BEG=0
-CONSUMER_NO_END=0
-WORKERS=1
+ENABLE_WEBSERVER=${ENABLE_WEBSERVER:-1} # Default to enable web server
+ENABLE_TASKEXECUTOR=${ENABLE_TASKEXECUTOR:-1}  # Default to enable task executor
+ENABLE_DATASYNC=${ENABLE_DATASYNC:-1}
+ENABLE_MCP_SERVER=${ENABLE_MCP_SERVER:-0}
+ENABLE_ADMIN_SERVER=${ENABLE_ADMIN_SERVER:-0} # Default close admin server
+ENABLE_POWERRAG_SERVER=${ENABLE_POWERRAG_SERVER:-1} # Default close PowerRAG server
+CONSUMER_NO_BEG=${CONSUMER_NO_BEG:-0}
+CONSUMER_NO_END=${CONSUMER_NO_END:-0}
+WORKERS=${WORKERS:-1}
+
+# -----------------------------------------------------------------------------
+# Multi ragflow_server support (multiple processes in one container)
+#
+# Notes:
+# - ragflow_server reads its listen port from conf/${RAGFLOW_SERVICE_CONF:-service_conf.yaml}
+# - We generate multiple config files (service_conf_ragflow_<idx>.yaml) with different ports
+# - We start multiple ragflow_server processes, each with its own RAGFLOW_SERVICE_CONF
+# -----------------------------------------------------------------------------
+#
+# Env vars:
+# - SVR_COUNT
+# - SVR_HTTP_PORT
+# - SVR_EXTRA_BASE_HTTP_PORT
+# - ADMIN_SVR_HTTP_PORT
+SVR_COUNT="${SVR_COUNT:-1}"
+SVR_HTTP_PORT="${SVR_HTTP_PORT:-9380}"
+# Extra instances will listen on: SVR_EXTRA_BASE_HTTP_PORT + (idx-1)
+SVR_EXTRA_BASE_HTTP_PORT="${SVR_EXTRA_BASE_HTTP_PORT:-9400}"
+ADMIN_SVR_HTTP_PORT="${ADMIN_SVR_HTTP_PORT:-9381}"
 
 MCP_HOST="127.0.0.1"
 MCP_PORT=9382
@@ -149,16 +169,64 @@ for arg in "$@"; do
 done
 
 # -----------------------------------------------------------------------------
-# Replace env variables in the service_conf.yaml file
+# Render service config(s) from template
 # -----------------------------------------------------------------------------
 CONF_DIR="/ragflow/conf"
 TEMPLATE_FILE="${CONF_DIR}/service_conf.yaml.template"
 CONF_FILE="${CONF_DIR}/service_conf.yaml"
 
-rm -f "${CONF_FILE}"
-while IFS= read -r line || [[ -n "$line" ]]; do
-    eval "echo \"$line\"" >> "${CONF_FILE}"
-done < "${TEMPLATE_FILE}"
+#
+# -----------------------------------------------------------------------------
+# Ensure a stable SECRET_KEY across multiple ragflow_server processes.
+#
+# Why:
+# - Auth tokens are signed with settings.SECRET_KEY (derived from RAGFLOW_SECRET_KEY
+#   or conf ragflow.secret_key). If multiple ragflow_server instances in the same
+#   container auto-generate different keys, nginx load-balancing will cause:
+#   "Signature ... does not match" -> 401 -> frontend jumps back to login.
+#
+# Strategy:
+# - If user didn't provide a strong RAGFLOW_SECRET_KEY (>=32 chars), generate ONE
+#   and export it so all child processes share it.
+# - Persist it under /ragflow/conf so restarts inside the same volume keep stable.
+# -----------------------------------------------------------------------------
+#
+function ensure_ragflow_secret_key() {
+    local key_file="${CONF_DIR}/.ragflow_secret_key"
+
+    if [[ -n "${RAGFLOW_SECRET_KEY:-}" && ${#RAGFLOW_SECRET_KEY} -ge 32 ]]; then
+        export RAGFLOW_SECRET_KEY
+        return 0
+    fi
+
+    if [[ -f "${key_file}" ]]; then
+        RAGFLOW_SECRET_KEY="$(cat "${key_file}")"
+    else
+        RAGFLOW_SECRET_KEY="$("$PY" -c 'import secrets; print(secrets.token_hex(32))')"
+        echo -n "${RAGFLOW_SECRET_KEY}" > "${key_file}"
+        chmod 600 "${key_file}" || true
+    fi
+
+    if [[ ${#RAGFLOW_SECRET_KEY} -lt 32 ]]; then
+        echo "ERROR: failed to initialize a strong RAGFLOW_SECRET_KEY" >&2
+        return 1
+    fi
+
+    export RAGFLOW_SECRET_KEY
+}
+
+function render_service_conf() {
+    local out_file="$1"
+    local ragflow_port="$2"
+    local admin_port="$3"
+
+    rm -f "${out_file}"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # shellcheck disable=SC2034
+        SVR_HTTP_PORT="${ragflow_port}" ADMIN_SVR_HTTP_PORT="${admin_port}" \
+          eval "echo \"$line\"" >> "${out_file}"
+    done < "${TEMPLATE_FILE}"
+}
 
 export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/"
 PY=python3
@@ -193,6 +261,71 @@ function start_mcp_server() {
         "${MCP_JSON_RESPONSE_FLAG}" &
 }
 
+function start_powerrag_server() {
+    echo "Starting PowerRAG Server on ${POWERRAG_PORT}..."
+    while true; do
+        "$PY" powerrag/server/powerrag_server.py \
+            --port="${POWERRAG_PORT}"
+    done &
+}
+
+function _prepare_multi_ragflow_confs() {
+    # Render base service_conf.yaml (used by other processes that don't set RAGFLOW_SERVICE_CONF)
+    render_service_conf "${CONF_FILE}" "${SVR_HTTP_PORT}" "${ADMIN_SVR_HTTP_PORT}"
+
+    # Create per-instance configs
+    local idx port conf_name conf_path
+    for (( idx=0; idx<${SVR_COUNT}; idx++ )); do
+       
+        if [[ "${idx}" -eq 0 ]]; then
+            port="${SVR_HTTP_PORT}"
+            conf_name="local.service_conf.yaml"
+        else
+            port=$((SVR_EXTRA_BASE_HTTP_PORT + idx - 1))
+            conf_name="service_conf_ragflow_${port}.yaml"
+        fi
+        conf_path="${CONF_DIR}/${conf_name}"
+        render_service_conf "${conf_path}" "${port}" "${ADMIN_SVR_HTTP_PORT}"
+    done
+}
+
+function _start_ragflow_instance() {
+    local idx="$1"
+    local port="$2"
+    local conf_name="$3"
+
+    echo "Starting ragflow_server[${idx}] on ${port} using conf/${conf_name} ..."
+    # Align with scripts/deploy.sh:
+    # - run without restart loop (process supervision is external to entrypoint)
+    # - set per-instance logfile basename so logs are split by port
+    RAGFLOW_SERVICE_CONF="${conf_name}" \
+    RAGFLOW_LOG_BASENAME="ragflow_server_${port}" \
+    "$PY" api/ragflow_server.py ${INIT_SUPERUSER_ARGS} &
+}
+
+function start_ragflow_servers() {
+    ensure_ragflow_secret_key
+    _prepare_multi_ragflow_confs
+
+    # Generate nginx upstream include files so nginx can proxy/load-balance to all instances
+    : > /etc/nginx/conf.d/ragflow_upstream.conf
+    : > /etc/nginx/conf.d/admin_upstream.conf
+    echo "server 127.0.0.1:${ADMIN_SVR_HTTP_PORT};" >> /etc/nginx/conf.d/admin_upstream.conf
+
+    local idx port conf_name
+    for (( idx=0; idx<${SVR_COUNT}; idx++ )); do
+        if [[ "${idx}" -eq 0 ]]; then
+            port="${SVR_HTTP_PORT}"
+            conf_name="local.service_conf.yaml"
+        else
+            port=$((SVR_EXTRA_BASE_HTTP_PORT + idx - 1))
+            conf_name="service_conf_ragflow_${port}.yaml"
+        fi
+        echo "server 127.0.0.1:${port};" >> /etc/nginx/conf.d/ragflow_upstream.conf
+        _start_ragflow_instance "${idx}" "${port}" "${conf_name}"
+    done
+}
+
 function ensure_docling() {
     [[ "${USE_DOCLING}" == "true" ]] || { echo "[docling] disabled by USE_DOCLING"; return 0; }
     python3 -c 'import pip' >/dev/null 2>&1 || python3 -m ensurepip --upgrade || true
@@ -207,15 +340,13 @@ function ensure_docling() {
 ensure_docling
 
 if [[ "${ENABLE_WEBSERVER}" -eq 1 ]]; then
+    echo "Starting ragflow_server..."
+    start_ragflow_servers
+
+    # nginx upstream include files are generated by start_ragflow_servers;
+    # start nginx after generation so it picks them up (no reload needed).
     echo "Starting nginx..."
     /usr/sbin/nginx
-
-    echo "Starting ragflow_server..."
-    while true; do
-        "$PY" api/ragflow_server.py ${INIT_SUPERUSER_ARGS} &
-        wait;
-        sleep 1;
-    done &
 fi
 
 if [[ "${ENABLE_DATASYNC}" -eq 1 ]]; then

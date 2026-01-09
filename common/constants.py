@@ -14,10 +14,19 @@
 #  limitations under the License.
 #
 
+import os
 from enum import Enum, IntEnum
 from strenum import StrEnum
 
-SERVICE_CONF = "service_conf.yaml"
+#
+# Allow overriding the service config filename per process.
+# This is useful for running multiple ragflow_server processes in one container,
+# each reading its own `conf/<name>` (and optional `conf/local.<name>`).
+#
+# Example:
+#   RAGFLOW_SERVICE_CONF=service_conf_ragflow_1.yaml python3 api/ragflow_server.py
+#
+SERVICE_CONF = os.getenv("RAGFLOW_SERVICE_CONF", "service_conf.yaml")
 RAG_FLOW_SERVICE_NAME = "ragflow"
 
 class CustomEnum(Enum):

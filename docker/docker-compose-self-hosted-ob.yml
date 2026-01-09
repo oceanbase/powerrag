@@ -30,7 +30,12 @@ services:
       - "host.docker.internal:host-gateway"
 
   # Gotenberg service for document conversion
+  # Optional (disabled by default). Enable with:
+  #   docker compose --profile gotenberg up -d
+  # or:
+  #   COMPOSE_PROFILES=gotenberg docker compose up -d
   gotenberg:
+    profiles: ["gotenberg"]
     image: gotenberg/gotenberg:8
     env_file: .env
     environment:
