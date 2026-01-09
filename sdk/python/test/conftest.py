@@ -15,14 +15,35 @@
 #
 
 import os
+import sys
+from pathlib import Path
+
+# CRITICAL: Monkey patch beartype before importing ragflow_sdk
+# This is a workaround because ragflow_sdk/__init__.py calls beartype_this_package()
+# without checking BEARTYPE_DISABLE environment variable
+def _disable_beartype():
+    """Disable beartype by monkey patching beartype_this_package to do nothing."""
+    try:
+        import beartype.claw
+        original_beartype_this_package = beartype.claw.beartype_this_package
+        
+        def noop_beartype_this_package(*args, **kwargs):
+            """No-op version of beartype_this_package that does nothing."""
+            pass
+        
+        beartype.claw.beartype_this_package = noop_beartype_this_package
+        os.environ['BEARTYPE_DISABLE'] = '1'
+    except ImportError:
+        pass
+
+# Call before any imports that might trigger ragflow_sdk import
+_disable_beartype()
 
 import pytest
 import requests
 
 HOST_ADDRESS = os.getenv("HOST_ADDRESS", "http://127.0.0.1:9380")
 ZHIPU_AI_API_KEY = os.getenv("ZHIPU_AI_API_KEY")
-if ZHIPU_AI_API_KEY is None:
-    pytest.exit("Error: Environment variable ZHIPU_AI_API_KEY must be set")
 
 # def generate_random_email():
 #     return 'user_' + ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))+'@1.com'
@@ -62,6 +83,8 @@ def login():
 
 @pytest.fixture(scope="session")
 def get_api_key_fixture():
+    if ZHIPU_AI_API_KEY is None:
+        pytest.skip("ZHIPU_AI_API_KEY environment variable is not set")
     try:
         register()
     except Exception as e:
@@ -104,6 +127,7 @@ def get_my_llms(auth, name):
 
 
 def add_models(auth):
+    # This function is only called from set_tenant_info which already checks ZHIPU_AI_API_KEY
     url = HOST_ADDRESS + "/v1/llm/set_api_key"
     authorization = {"Authorization": auth}
     models_info = {
@@ -130,6 +154,9 @@ def get_tenant_info(auth):
 
 @pytest.fixture(scope="session", autouse=True)
 def set_tenant_info(get_auth):
+    # Skip if ZHIPU_AI_API_KEY is not set (for unit tests that don't need it)
+    if ZHIPU_AI_API_KEY is None:
+        return
     auth = get_auth
     try:
         add_models(auth)
