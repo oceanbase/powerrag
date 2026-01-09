@@ -3,11 +3,12 @@ export default {
     common: {
       confirm: '确定',
       back: '返回',
-      noResults: '无结果。',
+      noResults: '未查到结果',
       selectPlaceholder: '请选择',
       selectAll: '全选',
       delete: '删除',
       deleteModalTitle: '确定删除吗?',
+      deleteThem: '确定要删除吗？',
       ok: '确认',
       cancel: '取消',
       yes: '是',
@@ -50,7 +51,10 @@ export default {
       search: '搜索',
       noDataFound: '没有找到数据。',
       noData: '暂无数据',
+      bedrockCredentialsHint:
+        '提示：Access Key / Secret Key 可留空，以启用 AWS IAM 自动验证。',
       promptPlaceholder: '请输入或使用 / 快速插入变量。',
+      selected: '已选择',
     },
     login: {
       loginTitle: '登录账户',
@@ -89,6 +93,72 @@ export default {
       search: '搜索',
       welcome: '欢迎来到',
       dataset: '知识库',
+      memories: '记忆',
+    },
+    memories: {
+      llmTooltip: '分析对话内容，提取关键信息，并生成结构化的记忆摘要。',
+      embeddingModelTooltip:
+        '将文本转换为数值向量，用于语义相似度搜索和记忆检索。',
+      embeddingModelError: '记忆类型为必填项，且"原始"类型不可删除。',
+      memoryTypeTooltip: `原始: 用户与代理之间的原始对话内容（默认必需）。
+语义记忆: 关于用户和世界的通用知识和事实。
+情景记忆: 带时间戳的特定事件和经历记录。
+程序记忆: 学习的技能、习惯和自动化程序。`,
+      raw: '原始',
+      semantic: '语义',
+      episodic: '情景',
+      procedural: '程序',
+      editName: '编辑名称',
+      memory: '记忆',
+      createMemory: '创建记忆',
+      name: '名称',
+      memoryNamePlaceholder: '记忆名称',
+      memoryType: '记忆类型',
+      embeddingModel: '嵌入模型',
+      selectModel: '选择模型',
+      llm: '大语言模型',
+      delMemoryWarn: `删除后，此记忆中的所有消息都将被删除，代理将无法检索。`,
+    },
+    memory: {
+      messages: {
+        forgetMessageTip: '确定遗忘吗？',
+        messageDescription: '记忆提取使用高级设置中的提示词和温度值进行配置。',
+        copied: '已复制！',
+        content: '内容',
+        delMessageWarn: `遗忘后，代理将无法检索此消息。`,
+        forgetMessage: '遗忘消息',
+        sessionId: '会话ID',
+        agent: '智能体',
+        type: '类型',
+        validDate: '有效日期',
+        forgetAt: '遗忘于',
+        source: '来源',
+        enable: '启用',
+        action: '操作',
+      },
+      config: {
+        memorySizeTooltip: `记录每条消息的内容 + 其嵌入向量（≈ 内容 + 维度 × 8 字节）。
+例如：一条带有 1024 维嵌入的 1 KB 消息大约使用 9 KB。5 MB 的默认限制大约可容纳 500 条此类消息。`,
+        avatar: '头像',
+        description: '描述',
+        memorySize: '记忆大小',
+        advancedSettings: '高级设置',
+        permission: '权限',
+        onlyMe: '仅自己',
+        team: '团队',
+        storageType: '存储类型',
+        storageTypePlaceholder: '请选择存储类型',
+        forgetPolicy: '遗忘策略',
+        temperature: '温度',
+        systemPrompt: '系统提示词',
+        systemPromptPlaceholder: '请输入系统提示词',
+        userPrompt: '用户提示词',
+        userPromptPlaceholder: '请输入用户提示词',
+      },
+      sideBar: {
+        messages: '消息',
+        configuration: '配置',
+      },
     },
     knowledgeList: {
       welcome: '欢迎回来',
@@ -99,8 +169,50 @@ export default {
       doc: '文档',
       searchKnowledgePlaceholder: '搜索',
       noMoreData: '没有更多数据了',
+      parserRequired: '分块方法必填',
     },
     knowledgeDetails: {
+      metadata: {
+        toMetadataSettingTip: '在配置中设置自动元数据',
+        toMetadataSetting: '生成设置',
+        descriptionTip:
+          '提供描述或示例来指导大语言模型为此字段提取值。如果留空，将依赖字段名称。',
+        restrictTDefinedValuesTip:
+          '枚举模式：限制大语言模型提取的值只能匹配预设值。在下方定义值。',
+        valueExists: '值已存在。确认合并重复项并组合所有关联文件。',
+        fieldNameExists: '字段名已存在。确认合并重复项并组合所有关联文件。',
+        valueSingleExists: '值已存在。确认合并重复项。',
+        fieldSingleNameExists: '字段名已存在。确认合并重复项。',
+        fieldExists: '字段名已存在。',
+        fieldSetting: '字段设置',
+        changesAffectNewParses: '更改仅影响新的解析。',
+        editMetadataForDataset: '查看和编辑元数据 ',
+        restrictDefinedValues: '限制为已定义的值',
+        metadataGenerationSettings: '元数据生成设置',
+        manageMetadataForDataset: '管理此数据集的元数据',
+        manageMetadata: '管理元数据',
+        metadata: '元数据',
+        values: '值',
+        value: '值',
+        action: '操作',
+        field: '字段',
+        description: '描述',
+        fieldName: '字段名称',
+        editMetadata: '编辑元数据',
+        deleteWarn: '此 {{field}} 将从所有关联文件中移除',
+        deleteManageFieldAllWarn:
+          '此字段及其所有对应值将从所有关联的文件中删除。',
+        deleteManageValueAllWarn: '此值将从所有关联的文件中删除。',
+        deleteManageFieldSingleWarn: '此字段及其所有对应值将从此文件中删除。',
+        deleteManageValueSingleWarn: '此值将从此文件中删除。',
+        deleteSettingFieldWarn: `此字段将被删除；现有元数据不会受到影响。`,
+        deleteSettingValueWarn: `此值将被删除；现有元数据不会受到影响。`,
+      },
+      redoAll: '清除现有分块',
+      applyAutoMetadataSettings: '应用全局自动元数据设置',
+      parseFileTip: '您确定要解析吗？',
+      parseFile: '解析文件',
+      emptyMetadata: '无元数据',
       localUpload: '本地上传',
       fileSize: '文件大小',
       fileType: '文件类型',
@@ -226,15 +338,12 @@ export default {
       delimiter: `文本分段标识符`,
       delimiterTip:
         '支持多字符作为分隔符，多字符用两个反引号 \\`\\` 分隔符包裹。若配置成：\\n`##`; 系统将首先使用换行符、两个#号以及分号先对文本进行分割，随后再对分得的小文本块按照「建议文本块大小」设定的大小进行拼装。在设置文本分段标识符前请确保理解上述文本分段切片机制。',
-      regexPattern: '正则表达式模式',
-      regexPatternTip:
-        '用于初步分割文本单元的正则表达式模式。该模式定义了在分块之前如何将文本分割成单元。例如："[.!?]+\\s*" 匹配句子结尾。',
       html4excel: '表格转HTML',
       html4excelTip: `与 General 切片方法配合使用。未开启状态下，表格文件（XLSX、XLS（Excel 97-2003））会按行解析为键值对。开启后，表格文件会被解析为 HTML 表格。若原始表格超过 12 行，系统会自动按每 12 行拆分为多个 HTML 表格。欲了解更多详情，请参阅 https://ragflow.io/docs/dev/enable_excel2html。`,
       autoKeywords: '自动关键词提取',
-      autoKeywordsTip: `自动为每个文本块中提取 N 个关键词，用以提升查询精度。请注意：该功能采用“系统模型设置”中设置的默认聊天模型提取关键词，因此也会产生更多 Token 消耗。另外，你也可以手动更新生成的关键词。详情请见 https://ragflow.io/docs/dev/autokeyword_autoquestion。`,
+      autoKeywordsTip: `自动为每个文本块中提取 N 个关键词，用以提升查询精度。请注意：该功能采用在“配置”中指定的索引模型提取关键词，因此也会产生更多 Token 消耗。另外，你也可以手动更新生成的关键词。详情请见 https://ragflow.io/docs/dev/autokeyword_autoquestion。`,
       autoQuestions: '自动问题提取',
-      autoQuestionsTip: `利用“系统模型设置”中设置的 chat model 对知识库的每个文本块提取 N 个问题以提高其排名得分。请注意，开启后将消耗额外的 token。您可以在块列表中查看、编辑结果。如果自动问题提取发生错误，不会妨碍整个分块过程，只会将空结果添加到原始文本块。详情请见 https://ragflow.io/docs/dev/autokeyword_autoquestion。`,
+      autoQuestionsTip: `利用在“配置”中指定的索引模型 对知识库的每个文本块提取 N 个问题以提高其排名得分。请注意，开启后将消耗额外的 token。您可以在块列表中查看、编辑结果。如果自动问题提取发生错误，不会妨碍整个分块过程，只会将空结果添加到原始文本块。详情请见 https://ragflow.io/docs/dev/autokeyword_autoquestion。`,
       redo: '是否清空已有 {{chunkNum}}个 chunk？',
       setMetaData: '设置元数据',
       pleaseInputJson: '请输入JSON',
@@ -265,6 +374,20 @@ export default {
       theDocumentBeingParsedCannotBeDeleted: '正在解析的文档不能被删除',
     },
     knowledgeConfiguration: {
+      settings: '设置',
+      imageTableContextWindow: '图像与表格上下文窗口',
+      imageTableContextWindowTip:
+        '抓取图像与表格上下方的 N 个 token，为该 chunk 提供更丰富的背景上下文。',
+      autoMetadata: '自动元数据',
+      mineruOptions: 'MinerU 选项',
+      mineruParseMethod: '解析方法',
+      mineruParseMethodTip:
+        'PDF 解析方法：auto（自动检测）、txt（文本提取）、ocr（光学字符识别）',
+      mineruFormulaEnable: '公式识别',
+      mineruFormulaEnableTip:
+        '启用公式识别。注意：对于西里尔文档可能无法正常工作。',
+      mineruTableEnable: '表格识别',
+      mineruTableEnableTip: '启用表格识别和提取。',
       generationScopeTip: '选择 RAPTOR 的生成范围：整个知识库或单个文件。',
       generationScope: '生成范围',
       scopeSingleFile: '单文件',
@@ -293,7 +416,7 @@ export default {
       fileFilter: '正则匹配表达式',
       setDefaultTip: '',
       setDefault: '设置默认',
-      eidtLinkDataPipeline: '编辑pipeline',
+      editLinkDataPipeline: '编辑pipeline',
       linkPipelineSetTip: '管理与此数据集的数据管道链接',
       default: '默认',
       dataPipeline: 'Ingestion pipeline',
@@ -306,18 +429,7 @@ export default {
       parseType: '解析方法',
       manualSetup: '选择pipeline',
       builtIn: '内置',
-      titleDescription: '在这里更新您的知识库详细信息，尤其是切片方法。',
-      titleLevel: '标题级别',
-      titleLevelDescription:
-        '选择用于切分文档的最大标题级别（H1-H6）。更高级别包含所有更低级别。推荐：大多数文档使用 H1-H3。',
-      selectTitleLevel: '选择标题级别',
-      layoutRecognize: '布局识别方法',
-      layoutRecognizeDescription:
-        '选择解析 PDF 布局的方法。MinerU（PowerRAG）提供高质量的解析和标题检测。',
-      selectLayoutRecognize: '选择布局识别方法',
-      pdfParser: 'PDF解析器',
-      pdfParserTip: '选择用于解析PDF文档的解析器。仅对PDF文件有效。',
-      selectPdfParser: '选择PDF解析器',
+      titleDescription: '在这里更新您的记忆配置，特别是大语言模型和提示词。',
       name: '知识库名称',
       photo: '知识库图片',
       photoTip: '你可以上传4MB的文件',
@@ -334,10 +446,7 @@ export default {
       permissionsTip:
         '如果把知识库权限设为“团队”，则所有团队成员都可以操作该知识库。',
       chunkTokenNumberTip:
-        '建议的生成文本块的 token 数阈值。如果切分得到的小文本段 token 数达不到这一阈值就会不断与之后的文本段合并，直至再合并下一个文本段会超过这一阈值为止，此时产生一个最终文本块。如果系统在切分文本段时始终没有遇到文本分段标识符,即便文本段 token 数已经超过这一阈值，系统也不会生成新文本块。',
-      minChunkTokens: '最小切片大小',
-      minChunkTokensDescription:
-        '最小可接受的切片token数。小于此阈值的切片会与相邻切片合并，以避免内容过于碎片化。必须小于或等于建议文本块大小。',
+        '建议的生成文本块的 token 数阈值。如果切分得到的小文本段 token 数达不到这一阈值就会不断与之后的文本段合并，直至再合并下一个文本段会超过这一阈值为止，此时产生一个最终文本块。如果系统在切分文本段时始终没有遇到文本分段标识符，即便文本段 token 数已经超过这一阈值，系统也不会生成新文本块。',
       chunkMethod: '切片方法',
       chunkMethodTip: '说明位于右侧。',
       upload: '上传',
@@ -355,20 +464,6 @@ export default {
         '为帮助您更好地理解，我们提供了相关截图供您参考。',
       dialogueExamplesTitle: '对话示例',
       methodEmpty: '这将显示知识库类别的可视化解释',
-      regex: `<p>支持的文件格式为<b>PDF</b>、<b>DOCX</b>、<b>MD</b>、<b>TXT</b>。</p>
-      <p>此方法使用 PowerRAG 的高级正则表达式切片：</p>
-      <p>
-      <li>使用自定义正则表达式分割文本，实现精确控制。</li>
-      <li>合并相邻段落直到达到 token 阈值。</li>
-      <li>最适合具有统一结构和清晰分隔符的文档。</li>
-      </p>`,
-      smart: `<p>支持的文件格式为<b>PDF</b>、<b>DOCX</b>、<b>MD</b>、<b>TXT</b>。</p>
-      <p>此方法使用 PowerRAG 的高级智能切片：</p>
-      <p>
-      <li>基于 AST 的 markdown 解析实现智能文本分割。</li>
-      <li>在切片过程中保留文档结构和上下文。</li>
-      <li>最适合具有嵌套结构的复杂文档。</li>
-      </p>`,
       book: `<p>支持的文件格式为<b>DOCX</b>、<b>PDF</b>、<b>TXT</b>。</p><p>
       由于一本书很长，并不是所有部分都有用，如果是 PDF，
       请为每本书设置<i>页面范围</i>，以消除负面影响并节省分析计算时间。</p>`,
@@ -421,15 +516,7 @@ export default {
       我们不是将简历分块，而是将简历解析为结构化数据。 作为HR，你可以扔掉所有的简历，
       您只需与<i>'RAGFlow'</i>交谈即可列出所有符合资格的候选人。
       </p>
-      `,
-      title: `<p>支持的文件格式为<b>PDF</b>、<b>DOCX</b>、<b>MD</b>、<b>TXT</b>。</p>
-      <p>此方法使用 PowerRAG 的高级标题切片：</p>
-      <p>
-      <li>使用 MinerU 解析器检测文档结构，实现高质量标题识别。</li>
-      <li>按层次化标题（H1-H6）切分文本，同时保留上下文。</li>
-      <li>合并相邻段落直到达到 token 阈值。</li>
-      <li>最适合具有清晰章节层次结构的文档。</li>
-      </p>`,
+        `,
       table: `支持<p><b>XLSX</b>和<b>CSV/TXT</b>格式文件。</p><p>
       以下是一些提示：
       <ul>
@@ -468,10 +555,10 @@ export default {
 注意您需要指定的条目类型。</p>`,
       tag: `<p>使用“Tag”分块方法的知识库用作标签集.其他知识库可以把标签集当中的标签按照相似度匹配到自己对应的文本块中，对这些知识库的查询也将根据此标签集对自己进行标记。</p>
 <p>标签集<b>不会</b>直接参与 RAG 检索过程。</p>
-<p>标签集中的每个文本分块是都是相互独立的标签和标签描述的文本对。</p>
+<p>标签集中的每个文本分块都是相互独立的标签和标签描述的文本对。</p>
 
 <p>Tag 分块方法支持<b>XLSX</b>和<b>CSV/TXT</b>文件格式。</p>
-<p>如果文件为<b>XLSX</b>格式，则它应该包含两列无标题：一列用于标签描述，另一列用于标签，标签描述列位于标签列之前。支持多个工作表，只要列结构正确即可。</p>
+<p>如果文件为<b>XLSX</b>格式，则它应该包含无标题的两列：一列用于标签描述，另一列用于标签，标签描述列位于标签列之前。支持多个工作表，只要列结构正确即可。</p>
 <p>如果文件为 <b>CSV/TXT</b> 格式，则必须使用 UTF-8 编码并以 TAB 作为分隔符来分隔内容和标签。</p>
 <p>在标签列中，标签之间使用英文逗号分隔。</p>
 <i>不符合上述规则的文本行将被忽略。</i>
@@ -709,15 +796,14 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       metadata: '元数据',
       metadataTip:
         '元数据过滤是使用元数据属性（例如标签、类别或访问权限）来优化和控制系统内相关信息检索的过程。',
-      customLangchainExtractionConfig: '自定义 Langchain 提取配置',
-      customLangchainExtractionConfigTip:
-        '启用自定义 Langchain 提取配置。如果未启用，将使用知识库 pipeline 中的配置。',
       conditions: '条件',
+      metadataKeys: '可选过滤项',
       addCondition: '增加条件',
       meta: {
         disabled: '禁用',
         auto: '自动',
         manual: '手动',
+        semi_auto: '半自动',
       },
       cancel: '取消',
       chatSetting: '聊天设置',
@@ -727,6 +813,11 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       tocEnhanceTip: `解析文档时生成了目录信息（见General方法的‘启用目录抽取’），让大模型返回和用户问题相关的目录项，从而利用目录项拿到相关chunk，对这些chunk在排序中进行加权。这种方法来源于模仿人类查询书本中知识的行为逻辑`,
     },
     setting: {
+      deleteModel: '删除模型',
+      modelEmptyTip: '暂无可用模型,<br>请先在右侧面板添加模型。',
+      sourceEmptyTip: '暂未添加任何数据源，请从下方选择一个进行连接。',
+      seconds: '秒',
+      minutes: '分',
       edit: '编辑',
       cropTip: '拖动选区可以选择要图片的裁剪位置，滚动可以放大/缩小选区',
       cropImage: '剪裁图片',
@@ -736,9 +827,11 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
         '检查这是否是 Confluence Cloud 实例，如果是 Confluence 服务/数据中心，则取消选中。',
       confluenceWikiBaseUrlTip:
         'Confluence Wiki 的基础 URL（例如 https://your-domain.atlassian.net/wiki）',
+      confluenceSpaceKeyTip:
+        '可选：指定空间键以限制同步到特定空间。留空则同步所有可访问的空间。多个空间请用逗号分隔（例如：DEV,DOCS,HR）',
       s3PrefixTip: `指定 S3 存储桶内的文件夹路径，用于读取文件。
 示例：general/v2/`,
-      addDataSourceModalTital: '创建你的 {{name}} 链接',
+      addDataSourceModalTitle: '创建你的 {{name}} 链接',
       deleteSourceModalTitle: '删除数据源链接',
       deleteSourceModalContent: `
       <p>您确定要删除此数据源链接吗？</p>`,
@@ -749,10 +842,15 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       log: '日志',
       confluenceDescription: '连接你的 Confluence 工作区以搜索文档内容。',
       s3Description: ' 连接你的 AWS S3 存储桶以导入和同步文件。',
+      google_cloud_storageDescription:
+        '连接你的 Google Cloud Storage 存储桶以导入和同步文件。',
       discordDescription: ' 连接你的 Discord 服务器以访问和分析聊天数据。',
       notionDescription: ' 同步 Notion 页面与数据库，用于知识检索。',
+      oci_storageDescription:
+        '连接你的 Oracle Cloud Object Storage 存储桶以导入和同步文件。',
       google_driveDescription:
         '通过 OAuth 连接 Google Drive，并同步指定的文件夹或云端硬盘。',
+      gmailDescription: '通过 OAuth 连接 Gmail，用于同步邮件。',
       google_driveTokenTip:
         '请上传由 OAuth helper 或 Google Cloud Console 导出的 OAuth token JSON。也支持上传 “installed” 或 “web” 类型的 client_secret JSON。若为首次同步，将自动弹出浏览器完成 OAuth 授权流程；如果该 JSON 已包含 refresh token，将会被自动复用。',
       google_drivePrimaryAdminTip: '拥有相应 Drive 访问权限的管理员邮箱。',
@@ -760,6 +858,23 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
         '需要索引其 “我的云端硬盘” 的邮箱，多个邮箱用逗号分隔（建议包含管理员）。',
       google_driveSharedFoldersTip:
         '需要同步的 Google Drive 文件夹链接，多个链接用逗号分隔。',
+      gmailPrimaryAdminTip:
+        '拥有 Gmail / Workspace 访问权限的主要管理员邮箱，用于列出域内用户并作为默认同步账号。',
+      gmailTokenTip:
+        '请上传由 Google Console 生成的 OAuth JSON。如果仅包含 client credentials，请通过浏览器授权一次以获取长期有效的刷新 Token。',
+      dropboxDescription: '连接 Dropbox，同步指定账号下的文件与文件夹。',
+      boxDescription: '连接你的 Box 云盘以同步文件和文件夹。',
+      githubDescription:
+        '连接 GitHub，可同步 Pull Request 与 Issue 内容用于检索。',
+      airtableDescription: '连接 Airtable，同步指定工作区下指定表格中的文件。',
+      gitlabDescription:
+        '连接 GitLab，同步仓库、Issue、合并请求（MR）及相关文档内容。',
+      asanaDescription: '连接 Asana，同步工作区中的文件。',
+      imapDescription:
+        '连接你的 IMAP 邮箱，同步指定mailboxes中的邮件，用于知识检索与分析',
+      r2Description: '连接你的 Cloudflare R2 存储桶以导入和同步文件。',
+      dropboxAccessTokenTip:
+        '请在 Dropbox App Console 生成 Access Token，并勾选 files.metadata.read、files.content.read、sharing.read 等必要权限。',
       jiraDescription: '接入 Jira 工作区，持续同步Issues、评论与附件。',
       jiraBaseUrlTip:
         'Jira 的 Base URL，例如：https://your-domain.atlassian.net。',
@@ -840,6 +955,8 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       tongyiBaseUrlTip:
         '对于中国用户，不需要填写或使用 https://dashscope.aliyuncs.com/compatible-mode/v1。对于国际用户，使用 https://dashscope-intl.aliyuncs.com/compatible-mode/v1。',
       tongyiBaseUrlPlaceholder: '(仅国际用户需要)',
+      minimaxBaseUrlTip: '仅国际用户：使用 https://api.minimax.io/v1。',
+      minimaxBaseUrlPlaceholder: '(仅国际用户填写 https://api.minimax.io/v1)',
       modify: '修改',
       systemModelSettings: '设置默认模型',
       chatModel: 'LLM',
@@ -885,6 +1002,15 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       bedrockAKMessage: '请输入 ACCESS KEY',
       addBedrockSK: 'SECRET KEY',
       bedrockSKMessage: '请输入 SECRET KEY',
+      awsAuthModeAccessKeySecret: 'Access Key 和 Secret',
+      awsAuthModeIamRole: 'IAM Role',
+      awsAuthModeAssumeRole: 'Assume Role',
+      awsAccessKeyId: 'AWS Access Key ID',
+      awsSecretAccessKey: 'AWS Secret Access Key',
+      awsRoleArn: 'AWS Role ARN',
+      awsRoleArnMessage: '请输入 AWS Role ARN',
+      awsAssumeRoleTip:
+        '选择此模式后，EC2 实例将使用其已有的 IAM Role 访问 AWS 服务，无需额外的凭证。',
       bedrockRegion: 'AWS Region',
       bedrockRegionMessage: '请选择！',
       'us-east-1': '美国东部 (弗吉尼亚北部)',
@@ -957,6 +1083,26 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       modelsToBeAddedTooltip:
         '如果你的模型供应商在这里没有列出，但是宣称 OpenAI-compatible，可以通过选择卡片 OpenAI-API-compatible 设置相关模型。',
       mcp: 'MCP',
+      mineru: {
+        modelNameRequired: '模型名称为必填项',
+        apiServerRequired: 'MinerU API服务器配置为必填项',
+        serverUrlBackendLimit: '仅在backend 为vlm-http-client 时可填写',
+        apiserver: 'MinerU API服务器配置',
+        outputDir: 'MinerU输出目录路径',
+        backend: 'MinerU处理后端类型',
+        serverUrl: 'MinerU服务器URL地址',
+        deleteOutput: '处理完成后删除输出文件',
+        selectBackend: '选择处理后端',
+        backendOptions: {
+          pipeline: '标准流水线处理',
+          vlmTransformers: '基于Transformers的视觉语言模型',
+          vlmVllmEngine: '基于vLLM引擎的视觉语言模型',
+          vlmHttpClient: '通过HTTP客户端连接的视觉语言模型',
+          vlmMlxEngine: '基于MLX引擎的视觉语言模型',
+          vlmVllmAsyncEngine: '基于vLLM异步引擎的视觉语言模型（实验性）',
+          vlmLmdeployEngine: '基于LMDeploy引擎的视觉语言模型（实验性）',
+        },
+      },
     },
     message: {
       registered: '注册成功',
@@ -1017,10 +1163,11 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       pleaseUploadAtLeastOneFile: '请上传至少一个文件',
     },
     flow: {
+      autoPlay: '自动播放',
       downloadFileTypeTip: '文件下载的类型',
       downloadFileType: '文件类型',
       formatTypeError: '格式或类型错误',
-      variableNameMessage: '名称只能包含字母和下划线',
+      variableNameMessage: '名称只能包含字母,数字和下划线',
       variableDescription: '变量的描述',
       defaultValue: '默认值',
       conversationVariable: '会话变量',
@@ -1073,15 +1220,15 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       search: '搜索',
       communication: '通信',
       developer: '开发者',
-      typeCommandOrsearch: '输入命令或或搜索...',
+      typeCommandORsearch: '输入命令或或搜索...',
       builtIn: '内置',
       goto: '异常分支',
       comment: '默认值',
       ExceptionDefaultValue: '异常处理默认值',
       exceptionMethod: '异常处理方法',
       maxRounds: '最大反思轮数',
-      delayEfterError: '错误后延迟',
-      maxRetries: '最大反思轮数',
+      delayAfterError: '错误后延迟',
+      maxRetries: '最大重试轮数',
       advancedSettings: '高级设置',
       addTools: '添加工具',
       sysPromptDefultValue: `
@@ -1117,7 +1264,7 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       dialog: '对话',
       flow: '工作流',
       noMoreData: '没有更多数据了',
-      historyversion: '历史版本',
+      historyVersion: '历史版本',
       version: {
         details: '版本详情',
         download: '下载',
@@ -1134,9 +1281,14 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       messageMsg: '请输入消息或删除此字段。',
       addField: '新增字段',
       addMessage: '新增消息',
-      loop: '循环上限',
-      loopTip:
+      loop: '循环',
+      loopDescription:
         'loop为当前组件循环次数上限，当循环次数超过loop的值时，说明组件不能完成当前任务，请重新优化agent',
+      exitLoop: '退出循环',
+      exitLoopDescription: `等同于 "break"。此节点没有配置项。当循环体到达此节点时，循环终止。`,
+      loopVariables: '循环变量',
+      maximumLoopCount: '最大循环次数',
+      loopTerminationCondition: '循环终止条件',
       yes: '是',
       no: '否',
       key: '键',
@@ -1187,6 +1339,27 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       searXNG: 'SearXNG',
       searXNGDescription:
         '该组件通过您提供的 SearXNG 实例地址进行搜索。请设置 Top N 和实例 URL。',
+      pdfGenerator: '文档生成器',
+      pDFGenerator: '文档生成器',
+      pdfGeneratorDescription: `该组件从 markdown 格式的内容生成文档（PDF、DOCX、TXT），支持自定义样式、图片和表格。支持：**粗体**、*斜体*、# 标题、- 列表、使用 | 语法的表格。`,
+      pDFGeneratorDescription: `该组件从 markdown 格式的内容生成文档（PDF、DOCX、TXT），支持自定义样式、图片和表格。支持：**粗体**、*斜体*、# 标题、- 列表、使用 | 语法的表格。`,
+      subtitle: '副标题',
+      logoImage: '标志图片',
+      logoPosition: '标志位置',
+      logoWidth: '标志宽度',
+      logoHeight: '标志高度',
+      fontFamily: '字体系列',
+      fontSize: '字体大小',
+      titleFontSize: '标题字体大小',
+      pageSize: '页面大小',
+      orientation: '方向',
+      marginTop: '上边距',
+      marginBottom: '下边距',
+      filename: '文件名',
+      outputDirectory: '输出目录',
+      addPageNumbers: '添加页码',
+      addTimestamp: '添加时间戳',
+      watermarkText: '水印文本',
       channel: '频道',
       channelTip: '针对该组件的输入进行文本搜索或新闻搜索',
       text: '文本',
@@ -1370,6 +1543,8 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
         endWith: '结束是',
         empty: '为空',
         notEmpty: '不为空',
+        is: '是',
+        isNot: '不是',
       },
       switchLogicOperatorOptions: {
         and: '与',
@@ -1531,7 +1706,7 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       contentTip: 'content: 邮件内容(可选)',
       jsonUploadTypeErrorMessage: '请上传json文件',
       jsonUploadContentErrorMessage: 'json 文件错误',
-      iteration: '循环',
+      iteration: '迭代',
       iterationDescription: `该组件负责迭代生成新的内容，对列表对象执行多次步骤直至输出所有结果。`,
       delimiterTip: `该分隔符用于将输入文本分割成几个文本片段，每个文本片段的回显将作为每次迭代的输入项。`,
       delimiterOptions: {
@@ -1577,8 +1752,7 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       variableAssignerDescription:
         '此组件对数据对象执行操作，包括提取、筛选和编辑数据中的键和值。',
       variableAggregator: '变量聚合',
-      variableAggregatorDescription: `将多路分支的变量聚合为一个变量，以实现下游节点统一配置。
-变量聚合节点（原变量赋值节点）是工作流程中的一个关键节点，它负责整合不同分支的输出结果，确保无论哪个分支被执行，其结果都能通过一个统一的变量来引用和访问。这在多分支的情况下非常有用，可将不同分支下相同作用的变量映射为一个输出变量，避免下游节点重复定义。`,
+      variableAggregatorDescription: `该过程将来自多个分支的变量聚合到一个变量中，以实现下游节点的统一配置。`,
       inputVariables: '输入变量',
       addVariable: '新增变量',
       runningHintText: '正在运行中...🕞',
@@ -1659,26 +1833,6 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       extractor: '提取器',
       extractorDescription:
         '使用 LLM 从文档块（例如摘要、分类等）中提取结构化见解。',
-      // PowerRAG 组件
-      advancedPDFParser: 'PowerRAG - 高级PDF解析器',
-      advancedPDFParserDescription: '高级PDF解析，支持表格和图像提取。',
-      documentToPDF: 'PowerRAG - 文档转PDF',
-      documentToPDFDescription: '将各种文档格式转换为PDF，支持自定义设置。',
-      semanticSplitter: 'PowerRAG - 语义分割器',
-      semanticSplitterDescription: '基于语义相似度分割文本，更好地保留上下文。',
-      hierarchicalSplitter: 'PowerRAG - 层次分割器',
-      hierarchicalSplitterDescription: '按文档层次结构和标题分割文档。',
-      regexBasedSplitter: 'PowerRAG - 正则表达式分割器',
-      regexBasedSplitterDescription:
-        '使用自定义正则表达式分割文本，实现精确控制。',
-      smartBasedSplitter: 'PowerRAG - 智能分割器',
-      smartBasedSplitterDescription: '基于AST的markdown解析实现智能文本分割。',
-      entityExtractor: 'PowerRAG - 实体提取器',
-      entityExtractorDescription: '提取命名实体，如人名、组织和地点。',
-      keywordExtractor: 'PowerRAG - 关键词提取器',
-      keywordExtractorDescription: '从文本中提取重要的关键词和短语。',
-      summaryExtractor: 'PowerRAG - 摘要提取器',
-      summaryExtractorDescription: '使用LLM或抽取式方法生成文档块的摘要。',
       outputFormat: '输出格式',
       fileFormats: '文件类型',
       fields: '字段',
@@ -1691,6 +1845,8 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
 Tokenizer 会根据所选方式将内容存储为对应的数据结构。`,
       filenameEmbdWeight: '文件名嵌入权重',
       parserMethod: '解析方法',
+      tableResultType: '表格返回形式',
+      markdownImageResponseType: '图片返回形式',
       systemPromptPlaceholder:
         '请输入用于图像分析的系统提示词，若为空则使用系统缺省值',
       exportJson: '导出 JSON',
@@ -1700,6 +1856,7 @@ Tokenizer 会根据所选方式将内容存储为对应的数据结构。`,
       keywords: '关键词',
       questions: '问题',
       metadata: '元数据',
+      toc: '目录',
       fieldName: '结果目的地',
       prompts: {
         system: {
@@ -1791,6 +1948,47 @@ Tokenizer 会根据所选方式将内容存储为对应的数据结构。`,
         removeFirst: '移除第一个',
         removeLast: '移除最后一个',
       },
+      webhook: {
+        name: '网络钩子',
+        methods: '方法',
+        contentTypes: '内容类型',
+        security: '安全配置',
+        schema: '模式',
+        response: '响应',
+        executionMode: '执行模式',
+        executionModeTip:
+          'Accepted Response：请求校验通过后立即返回接收成功响应，工作流在后台异步执行；Final Response：系统在工作流执行完成后返回最终处理结果',
+        authMethods: '认证方法',
+        authType: '认证类型',
+        limit: '请求限制',
+        per: '时间周期',
+        maxBodySize: '最大主体大小',
+        ipWhitelist: 'IP白名单',
+        tokenHeader: '令牌头部',
+        tokenValue: '令牌值',
+        username: '用户名',
+        password: '密码',
+        algorithm: '算法',
+        secret: '密钥',
+        issuer: '签发者',
+        audience: '受众',
+        requiredClaims: '必需声明',
+        header: '头部',
+        status: '状态',
+        headersTemplate: '头部模板',
+        bodyTemplate: '主体模板',
+        basic: '基础认证',
+        bearer: '承载令牌',
+        apiKey: 'API密钥',
+        queryParameters: '查询参数',
+        headerParameters: '请求头参数',
+        requestBodyParameters: '请求体参数',
+        overview: '概述',
+        logs: '日志',
+        agentStatus: '智能体状态：',
+      },
+      saveToMemory: '保存到Memory',
+      retrievalFrom: '检索来源',
     },
     footer: {
       profile: 'All rights reserved @ React',
@@ -1823,6 +2021,7 @@ Tokenizer 会根据所选方式将内容存储为对应的数据结构。`,
       editMCP: '编辑 MCP',
       toolsAvailable: '可用的工具',
       mcpServers: 'MCP 服务器',
+      mcpServer: 'MCP 服务器',
       customizeTheListOfMcpServers: '自定义 MCP 服务器列表',
       cachedTools: '缓存工具',
       selected: '已选择',
@@ -1918,37 +2117,33 @@ Tokenizer 会根据所选方式将内容存储为对应的数据结构。`,
       downloadFailedTip: '下载失败总数',
       processingSuccessTip: '处理成功的文件总数',
       processingFailedTip: '处理失败的文件总数',
+      noData: '暂无日志',
     },
-    powerrag: {
-      smartBasedSplitter: {
-        chunkTokenNum: '建议文本块大小（tokens）',
-        chunkTokenNumTooltip:
-          '建议的生成文本块的token数。切片器会在尊重文档结构和边界的前提下，尽量生成接近此大小的文本块。',
-        minChunkTokens: '最小切片大小（tokens）',
-        minChunkTokensTooltip:
-          '最小可接受的切片token数。小于此阈值的切片会与相邻切片合并，以避免内容过于碎片化。必须小于或等于建议文本块大小。',
-      },
-      regexBasedSplitter: {
-        pattern: '分隔符模式（正则表达式）',
-        patternTooltip:
-          '用于分割文本的正则表达式模式。默认：[.!?]+\\s*（在句子结尾处分割）',
-        chunkTokenNum: '建议文本块大小（tokens）',
-        chunkTokenNumTooltip:
-          '建议的生成文本块的token数。切片器会将相邻的文本段合并，直到达到此大小。',
-        minChunkTokens: '最小切片大小（tokens）',
-        minChunkTokensTooltip:
-          '最小可接受的切片token数。小于此阈值的切片会与相邻切片合并，以避免内容过于碎片化。必须小于或等于建议文本块大小。',
-      },
-      titleBasedSplitter: {
-        titleLevel: '标题级别',
-        titleLevelTooltip:
-          '用于分割的最大标题级别（1-6）。数字越大，包含的标题级别越多。',
-        chunkTokenNum: '建议文本块大小（tokens）',
-        chunkTokenNumTooltip:
-          '建议的生成文本块的token数。过大的章节会使用分隔符进一步分割。',
-        delimiter: '分隔符字符',
-        delimiterTooltip: '用于分割大章节的字符。默认：\\n!?;。；！？',
-      },
+
+    deleteModal: {
+      delAgent: '删除智能体',
+      delDataset: '删除知识库',
+      delSearch: '删除搜索',
+      delFile: '删除文件',
+      delFiles: '删除文件',
+      delFilesContent: '已选择 {{count}} 个文件',
+      delChat: '删除聊天',
+      delMember: '删除成员',
+    },
+
+    empty: {
+      noMCP: '暂无 MCP 服务器可用',
+      agentTitle: '尚未创建智能体',
+      notFoundAgent: '未查询到智能体',
+      datasetTitle: '尚未创建数据集',
+      notFoundDataset: '未查询到数据集',
+      chatTitle: '尚未创建聊天应用',
+      notFoundChat: '未查询到聊天应用',
+      searchTitle: '尚未创建搜索应用',
+      notFoundSearch: '未查询到搜索应用',
+      memoryTitle: '尚未创建记忆',
+      notFoundMemory: '未查询到记忆',
+      addNow: '立即添加',
     },
   },
 };

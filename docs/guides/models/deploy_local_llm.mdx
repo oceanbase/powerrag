@@ -7,7 +7,7 @@ slug: /deploy_local_llm
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-Deploy and run local models using Ollama, Xinference, or other frameworks.
+Deploy and run local models using Ollama, Xinference, VLLM ，SGLANG or other frameworks.
 
 ---
 
@@ -305,7 +305,7 @@ With the Ollama service running, open a new terminal and run `./ollama pull <mod
   </TabItem>
 </Tabs>
 
-### 4. Configure RAGflow
+### 4. Configure RAGFlow
 
 To enable IPEX-LLM accelerated Ollama in RAGFlow, you must also complete the configurations in RAGFlow. The steps are identical to those outlined in the *Deploy a local model using Ollama* section:
 
@@ -314,35 +314,41 @@ To enable IPEX-LLM accelerated Ollama in RAGFlow, you must also complete the con
 3. [Update System Model Settings](#6-update-system-model-settings)
 4. [Update Chat Configuration](#7-update-chat-configuration)
 
-## Deploy a local model using jina 
+### 5. Deploy VLLM 
 
-To deploy a local model, e.g., **gpt2**, using jina:
-
-### 1. Check firewall settings
-
-Ensure that your host machine's firewall allows inbound connections on port 12345.
+ubuntu 22.04/24.04
 
 ```bash
-sudo ufw allow 12345/tcp
-```
-
-### 2. Install jina package
-
-```bash
-pip install jina
-```
-
-### 3. Deploy a local model
-
-Step 1: Navigate to the **rag/svr** directory.
+  pip install vllm 
+  ```
+### 5.1 RUN VLLM WITH BEST PRACTISE
 
 ```bash
-cd rag/svr
-```
-
-Step 2: Run **jina_server.py**, specifying either the model's name or its local directory: 
-
+nohup vllm serve /data/Qwen3-8B --served-model-name Qwen3-8B-FP8 --dtype auto --port 1025 --gpu-memory-utilization 0.90 --tool-call-parser hermes --enable-auto-tool-choice  > /var/log/vllm_startup1.log 2>&1 &
+  ```
+you can get log info
 ```bash
-python jina_server.py  --model_name gpt2
-```
-> The script only supports models downloaded from Hugging Face.
+ tail -f -n 100 /var/log/vllm_startup1.log
+  ```
+when see the follow ,it means vllm engine is ready for access
+```bash
+Starting vLLM API server 0 on http://0.0.0.0:1025
+Started server process [19177]
+Application startup complete.
+ ```
+### 5.2 INTERGRATEING RAGFLOW WITH VLLM CHAT/EM/RERANK LLM WITH WEBUI
+
+setting->model providers->search->vllm->add ,configure as follow:
+
+![add vllm](https://raw.githubusercontent.com/infiniflow/ragflow-docs/main/images/ragflow_vllm.png)
+
+select vllm chat model as default llm model as follow:
+![chat](https://raw.githubusercontent.com/infiniflow/ragflow-docs/main/images/ragflow_vllm1.png)
+### 5.3 chat with vllm chat model
+create chat->create conversations-chat as follow:
+![chat](https://raw.githubusercontent.com/infiniflow/ragflow-docs/main/images/ragflow_vllm2.png)
+
+
+
+
+

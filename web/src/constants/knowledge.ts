@@ -62,6 +62,7 @@ export enum LlmModelType {
   Speech2text = 'speech2text',
   Rerank = 'rerank',
   TTS = 'tts',
+  Ocr = 'ocr',
 }
 
 export enum KnowledgeSearchParams {
@@ -95,3 +96,5 @@ export enum DocumentParserType {
   Regex = 'regex', // PowerRAG Regex Parser
   Smart = 'smart', // PowerRAG Smart Parser
 }
+
+export const TagRenameId = 'tagRename';

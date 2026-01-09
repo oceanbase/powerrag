@@ -14,6 +14,7 @@
 #  limitations under the License.
 #
 
+import asyncio
 import logging
 import math
 import os
@@ -28,16 +29,16 @@ from timeit import default_timer as timer
 
 import numpy as np
 import pdfplumber
-import trio
 import xgboost as xgb
 from huggingface_hub import snapshot_download
 from PIL import Image
 from pypdf import PdfReader as pdf2_read
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
 
 from common.file_utils import get_project_base_directory
 from common.misc_utils import pip_install_torch
 from deepdoc.vision import OCR, AscendLayoutRecognizer, LayoutRecognizer, Recognizer, TableStructureRecognizer
-from rag.app.picture import vision_llm_chunk as picture_vision_llm_chunk
 from rag.nlp import rag_tokenizer
 from rag.prompts.generator import vision_llm_describe_prompt
 from common import settings
@@ -64,7 +65,7 @@ class RAGFlowPdfParser:
         self.ocr = OCR()
         self.parallel_limiter = None
         if settings.PARALLEL_DEVICES > 1:
-            self.parallel_limiter = [trio.CapacityLimiter(1) for _ in range(settings.PARALLEL_DEVICES)]
+            self.parallel_limiter = [asyncio.Semaphore(1) for _ in range(settings.PARALLEL_DEVICES)]
 
         layout_recognizer_type = os.getenv("LAYOUT_RECOGNIZER_TYPE", "onnx").lower()
         if layout_recognizer_type not in ["onnx", "ascend"]:
@@ -353,7 +354,6 @@ class RAGFlowPdfParser:
     def _assign_column(self, boxes, zoomin=3):
         if not boxes:
             return boxes
-
         if all("col_id" in b for b in boxes):
             return boxes
 
@@ -361,61 +361,79 @@ class RAGFlowPdfParser:
         for b in boxes:
             by_page[b["page_number"]].append(b)
 
-        page_info = {}  # pg -> dict(page_w, left_edge, cand_cols)
-        counter = Counter()
+        page_cols = {}
 
         for pg, bxs in by_page.items():
             if not bxs:
-                page_info[pg] = {"page_w": 1.0, "left_edge": 0.0, "cand": 1}
-                counter[1] += 1
+                page_cols[pg] = 1
                 continue
 
-            if hasattr(self, "page_images") and self.page_images and len(self.page_images) >= pg:
-                page_w = self.page_images[pg - 1].size[0] / max(1, zoomin)
-                left_edge = 0.0
-            else:
-                xs0 = [box["x0"] for box in bxs]
-                xs1 = [box["x1"] for box in bxs]
-                left_edge = float(min(xs0))
-                page_w = max(1.0, float(max(xs1) - left_edge))
+            x0s_raw = np.array([b["x0"] for b in bxs], dtype=float)
 
-            widths = [max(1.0, (box["x1"] - box["x0"])) for box in bxs]
-            median_w = float(np.median(widths)) if widths else 1.0
+            min_x0 = np.min(x0s_raw)
+            max_x1 = np.max([b["x1"] for b in bxs])
+            width = max_x1 - min_x0
 
-            raw_cols = int(page_w / max(1.0, median_w))
+            INDENT_TOL = width * 0.12
+            x0s = []
+            for x in x0s_raw:
+                if abs(x - min_x0) < INDENT_TOL:
+                    x0s.append([min_x0])
+                else:
+                    x0s.append([x])
+            x0s = np.array(x0s, dtype=float)
 
-            # cand = raw_cols if (raw_cols >= 2 and median_w < page_w / raw_cols * 0.8) else 1
-            cand = raw_cols
+            max_try = min(4, len(bxs))
+            if max_try < 2:
+                max_try = 1
+            best_k = 1
+            best_score = -1
 
-            page_info[pg] = {"page_w": page_w, "left_edge": left_edge, "cand": cand}
-            counter[cand] += 1
+            for k in range(1, max_try + 1):
+                km = KMeans(n_clusters=k, n_init="auto")
+                labels = km.fit_predict(x0s)
 
-            logging.info(f"[Page {pg}] median_w={median_w:.2f}, page_w={page_w:.2f}, raw_cols={raw_cols}, cand={cand}")
+                centers = np.sort(km.cluster_centers_.flatten())
+                if len(centers) > 1:
+                    try:
+                        score = silhouette_score(x0s, labels)
+                    except ValueError:
+                        continue
+                else:
+                    score = 0
+                if score > best_score:
+                    best_score = score
+                    best_k = k
 
-        global_cols = counter.most_common(1)[0][0]
+            page_cols[pg] = best_k
+            logging.info(f"[Page {pg}] best_score={best_score:.2f}, best_k={best_k}")
+
+
+        global_cols = Counter(page_cols.values()).most_common(1)[0][0]
         logging.info(f"Global column_num decided by majority: {global_cols}")
 
+
         for pg, bxs in by_page.items():
             if not bxs:
                 continue
+            k = page_cols[pg]
+            if len(bxs) < k:
+                k = 1
+            x0s = np.array([[b["x0"]] for b in bxs], dtype=float)
+            km = KMeans(n_clusters=k, n_init="auto")
+            labels = km.fit_predict(x0s)
 
-            page_w = page_info[pg]["page_w"]
-            left_edge = page_info[pg]["left_edge"]
+            centers = km.cluster_centers_.flatten()
+            order = np.argsort(centers)
 
-            if global_cols == 1:
-                for box in bxs:
-                    box["col_id"] = 0
-                continue
+            remap = {orig: new for new, orig in enumerate(order)}
 
-            for box in bxs:
-                w = box["x1"] - box["x0"]
-                if w >= 0.8 * page_w:
-                    box["col_id"] = 0
-                    continue
-                cx = 0.5 * (box["x0"] + box["x1"])
-                norm_cx = (cx - left_edge) / page_w
-                norm_cx = max(0.0, min(norm_cx, 0.999999))
-                box["col_id"] = int(min(global_cols - 1, norm_cx * global_cols))
+            for b, lb in zip(bxs, labels):
+                b["col_id"] = remap[lb]
+
+            grouped = defaultdict(list)
+            for b in bxs:
+                grouped[b["col_id"]].append(b)
 
         return boxes
 
@@ -458,11 +476,13 @@ class RAGFlowPdfParser:
         self.boxes = bxs
 
     def _naive_vertical_merge(self, zoomin=3):
-        bxs = self._assign_column(self.boxes, zoomin)
+        #bxs = self._assign_column(self.boxes, zoomin)
+        bxs = self.boxes
 
         grouped = defaultdict(list)
         for b in bxs:
-            grouped[(b["page_number"], b.get("col_id", 0))].append(b)
+            # grouped[(b["page_number"], b.get("col_id", 0))].append(b)
+            grouped[(b["page_number"], "x")].append(b)
 
         merged_boxes = []
         for (pg, col), bxs in grouped.items():
@@ -533,7 +553,7 @@ class RAGFlowPdfParser:
 
             merged_boxes.extend(bxs)
 
-        self.boxes = sorted(merged_boxes, key=lambda x: (x["page_number"], x.get("col_id", 0), x["top"]))
+        #self.boxes = sorted(merged_boxes, key=lambda x: (x["page_number"], x.get("col_id", 0), x["top"]))
 
     def _final_reading_order_merge(self, zoomin=3):
         if not self.boxes:
@@ -1043,8 +1063,8 @@ class RAGFlowPdfParser:
 
                     self.total_page = len(self.pdf.pages)
 
-        except Exception:
-            logging.exception("RAGFlowPdfParser __images__")
+        except Exception as e:
+            logging.exception(f"RAGFlowPdfParser __images__, exception: {e}")
         logging.info(f"__images__ dedupe_chars cost {timer() - start}s")
 
         self.outlines = []
@@ -1071,7 +1091,7 @@ class RAGFlowPdfParser:
 
         logging.debug("Images converted.")
         self.is_english = [
-            re.search(r"[a-zA-Z0-9,/¸;:'\[\]\(\)!@#$%^&*\"?<>._-]{30,}", "".join(random.choices([c["text"] for c in self.page_chars[i]], k=min(100, len(self.page_chars[i])))))
+            re.search(r"[ a-zA-Z0-9,/¸;:'\[\]\(\)!@#$%^&*\"?<>._-]{30,}", "".join(random.choices([c["text"] for c in self.page_chars[i]], k=min(100, len(self.page_chars[i])))))
             for i in range(len(self.page_chars))
         ]
         if sum([1 if e else 0 for e in self.is_english]) > len(self.page_images) / 2:
@@ -1093,7 +1113,7 @@ class RAGFlowPdfParser:
 
             if limiter:
                 async with limiter:
-                    await trio.to_thread.run_sync(lambda: self.__ocr(i + 1, img, chars, zoomin, id))
+                    await asyncio.to_thread(self.__ocr, i + 1, img, chars, zoomin, id)
             else:
                 self.__ocr(i + 1, img, chars, zoomin, id)
 
@@ -1109,12 +1129,34 @@ class RAGFlowPdfParser:
                 return chars
 
             if self.parallel_limiter:
-                async with trio.open_nursery() as nursery:
-                    for i, img in enumerate(self.page_images):
-                        chars = __ocr_preprocess()
+                tasks = []
 
-                        nursery.start_soon(__img_ocr, i, i % settings.PARALLEL_DEVICES, img, chars, self.parallel_limiter[i % settings.PARALLEL_DEVICES])
-                        await trio.sleep(0.1)
+                for i, img in enumerate(self.page_images):
+                    chars = __ocr_preprocess()
+
+                    semaphore = self.parallel_limiter[i % settings.PARALLEL_DEVICES]
+
+                    async def wrapper(i=i, img=img, chars=chars, semaphore=semaphore):
+                        await __img_ocr(
+                            i,
+                            i % settings.PARALLEL_DEVICES,
+                            img,
+                            chars,
+                            semaphore,
+                        )
+
+                    tasks.append(asyncio.create_task(wrapper()))
+                    await asyncio.sleep(0)
+
+                try:
+                    await asyncio.gather(*tasks, return_exceptions=False)
+                except Exception as e:
+                    logging.error(f"Error in OCR: {e}")
+                    for t in tasks:
+                        t.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    raise
+
             else:
                 for i, img in enumerate(self.page_images):
                     chars = __ocr_preprocess()
@@ -1122,13 +1164,13 @@ class RAGFlowPdfParser:
 
         start = timer()
 
-        trio.run(__img_ocr_launcher)
+        asyncio.run(__img_ocr_launcher())
 
         logging.info(f"__images__ {len(self.page_images)} pages cost {timer() - start}s")
 
         if not self.is_english and not any([c for c in self.page_chars]) and self.boxes:
             bxes = [b for bxs in self.boxes for b in bxs]
-            self.is_english = re.search(r"[\na-zA-Z0-9,/¸;:'\[\]\(\)!@#$%^&*\"?<>._-]{30,}", "".join([b["text"] for b in random.choices(bxes, k=min(30, len(bxes)))]))
+            self.is_english = re.search(r"[ \na-zA-Z0-9,/¸;:'\[\]\(\)!@#$%^&*\"?<>._-]{30,}", "".join([b["text"] for b in random.choices(bxes, k=min(30, len(bxes)))]))
 
         logging.debug(f"Is it English: {self.is_english}")
 
@@ -1303,7 +1345,10 @@ class RAGFlowPdfParser:
 
         positions = []
         for ii, (pns, left, right, top, bottom) in enumerate(poss):
-            right = left + max_width
+            if 0 < ii < len(poss) - 1:
+                right = max(left + 10, right)
+            else:
+                right = left + max_width
             bottom *= ZM
             for pn in pns[1:]:
                 if 0 <= pn - 1 < page_count:
@@ -1404,6 +1449,7 @@ class VisionParser(RAGFlowPdfParser):
     def __init__(self, vision_model, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.vision_model = vision_model
+        self.outlines = []
 
     def __images__(self, fnm, zoomin=3, page_from=0, page_to=299, callback=None):
         try:
@@ -1432,6 +1478,8 @@ class VisionParser(RAGFlowPdfParser):
             pdf_page_num = idx  # 0-based
             if pdf_page_num < start_page or pdf_page_num >= end_page:
                 continue
+
+            from rag.app.picture import vision_llm_chunk as picture_vision_llm_chunk
 
             text = picture_vision_llm_chunk(
                 binary=img_binary,

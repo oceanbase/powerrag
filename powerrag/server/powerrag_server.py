@@ -32,8 +32,6 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from werkzeug.serving import run_simple
-
 # Initialize logging
 from common.log_utils import init_root_logger
 init_root_logger("powerrag_server")
@@ -115,7 +113,7 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    # Create Flask app
+    # Create Quart app
     app = create_app()
     
     # Start server
@@ -128,13 +126,12 @@ def main():
         logger.info(f"  - POST http://{args.host}:{args.port}/api/v1/powerrag/extract")
         logger.info(f"  - GET  http://{args.host}:{args.port}/health")
         
-        run_simple(
-            hostname=args.host,
+        # Run Quart app
+        app.run(
+            host=args.host,
             port=args.port,
-            application=app,
-            threaded=True,
-            use_reloader=args.reload,  # Only reload if explicitly requested
-            use_debugger=args.debug,   # Debugger enabled with --debug
+            debug=args.debug,
+            use_reloader=args.reload,
         )
     except Exception as e:
         logger.error(f"Failed to start PowerRAG server: {e}", exc_info=True)

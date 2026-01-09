@@ -78,14 +78,21 @@ class DoclingParser(RAGFlowPdfParser):
     def __images__(self, fnm, zoomin: int = 1, page_from=0, page_to=600, callback=None):
         self.page_from = page_from
         self.page_to = page_to
+        bytes_io = None
         try:
-            opener = pdfplumber.open(fnm) if isinstance(fnm, (str, PathLike)) else pdfplumber.open(BytesIO(fnm))
+            if not isinstance(fnm, (str, PathLike)):
+                bytes_io = BytesIO(fnm)
+
+            opener = pdfplumber.open(fnm) if isinstance(fnm, (str, PathLike)) else pdfplumber.open(bytes_io)
             with opener as pdf:
                 pages = pdf.pages[page_from:page_to]
                 self.page_images = [p.to_image(resolution=72 * zoomin, antialias=True).original for p in pages]
         except Exception as e:
             self.page_images = []
             self.logger.exception(e)
+        finally:
+            if bytes_io:
+                bytes_io.close()
 
     def _make_line_tag(self,bbox: _BBox) -> str:
         if bbox is None:
@@ -187,7 +194,7 @@ class DoclingParser(RAGFlowPdfParser):
                         bbox = _BBox(int(pn), bb[0], bb[1], bb[2], bb[3])
                 yield (DoclingContentType.EQUATION.value, text, bbox)
 
-    def _transfer_to_sections(self, doc) -> list[tuple[str, str]]:
+    def _transfer_to_sections(self, doc, parse_method: str) -> list[tuple[str, str]]:
         sections: list[tuple[str, str]] = []
         for typ, payload, bbox in self._iter_doc_items(doc):
             if typ == DoclingContentType.TEXT.value:
@@ -200,7 +207,12 @@ class DoclingParser(RAGFlowPdfParser):
                 continue
             
             tag = self._make_line_tag(bbox) if isinstance(bbox,_BBox) else ""
-            sections.append((section, tag))
+            if parse_method == "manual":
+                sections.append((section, typ, tag))
+            elif parse_method == "paper":
+                sections.append((section + tag, typ))
+            else:
+                sections.append((section, tag))
         return sections
 
     def cropout_docling_table(self, page_no: int, bbox: tuple[float, float, float, float], zoomin: int = 1):
@@ -282,7 +294,8 @@ class DoclingParser(RAGFlowPdfParser):
         output_dir: Optional[str] = None, 
         lang: Optional[str] = None,        
         method: str = "auto",             
-        delete_output: bool = True,       
+        delete_output: bool = True,
+        parse_method: str = "raw"     
     ):
 
         if not self.check_installation():
@@ -318,7 +331,7 @@ class DoclingParser(RAGFlowPdfParser):
         if callback:
             callback(0.7, f"[Docling] Parsed doc: {getattr(doc, 'num_pages', 'n/a')} pages")
 
-        sections = self._transfer_to_sections(doc)
+        sections = self._transfer_to_sections(doc, parse_method=parse_method)
         tables = self._transfer_to_tables(doc)
 
         if callback:

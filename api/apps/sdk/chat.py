@@ -21,13 +21,13 @@ from api.db.services.tenant_llm_service import TenantLLMService
 from api.db.services.user_service import TenantService
 from common.misc_utils import get_uuid
 from common.constants import RetCode, StatusEnum
-from api.utils.api_utils import check_duplicate_ids, get_error_data_result, get_result, token_required, request_json
+from api.utils.api_utils import check_duplicate_ids, get_error_data_result, get_result, token_required, get_request_json
 
 
 @manager.route("/chats", methods=["POST"])  # noqa: F821
 @token_required
 async def create(tenant_id):
-    req = await request_json()
+    req = await get_request_json()
     ids = [i for i in req.get("dataset_ids", []) if i]
     for kb_id in ids:
         kbs = KnowledgebaseService.accessible(kb_id=kb_id, user_id=tenant_id)
@@ -92,7 +92,7 @@ async def create(tenant_id):
     req["tenant_id"] = tenant_id
     # prompt more parameter
     default_prompt = {
-        "system": """You are an intelligent assistant. Please summarize the content of the knowledge base to answer the question. Please list the data in the knowledge base and answer in detail. When all knowledge base content is irrelevant to the question, your answer must include the sentence "The answer you are looking for is not found in the knowledge base!" Answers need to consider chat history.
+        "system": """You are an intelligent assistant. Please summarize the content of the dataset to answer the question. Please list the data in the dataset and answer in detail. When all dataset content is irrelevant to the question, your answer must include the sentence "The answer you are looking for is not found in the dataset!" Answers need to consider chat history.
       Here is the knowledge base:
       {knowledge}
       The above is the knowledge base.""",
@@ -146,7 +146,7 @@ async def create(tenant_id):
 async def update(tenant_id, chat_id):
     if not DialogService.query(tenant_id=tenant_id, id=chat_id, status=StatusEnum.VALID.value):
         return get_error_data_result(message="You do not own the chat")
-    req = await request_json()
+    req = await get_request_json()
     ids = req.get("dataset_ids", [])
     if "show_quotation" in req:
         req["do_refer"] = req.pop("show_quotation")
@@ -174,7 +174,9 @@ async def update(tenant_id, chat_id):
             req["llm_id"] = llm.pop("model_name")
             if req.get("llm_id") is not None:
                 llm_name, llm_factory = TenantLLMService.split_model_name_and_factory(req["llm_id"])
-                if not TenantLLMService.query(tenant_id=tenant_id, llm_name=llm_name, llm_factory=llm_factory, model_type="chat"):
+                model_type = llm.pop("model_type")
+                model_type = model_type if model_type in ["chat", "image2text"] else "chat"
+                if not TenantLLMService.query(tenant_id=tenant_id, llm_name=llm_name, llm_factory=llm_factory, model_type=model_type):
                     return get_error_data_result(f"`model_name` {req.get('llm_id')} doesn't exist")
         req["llm_setting"] = req.pop("llm")
     e, tenant = TenantService.get_by_id(tenant_id)
@@ -229,7 +231,7 @@ async def update(tenant_id, chat_id):
 async def delete_chats(tenant_id):
     errors = []
     success_count = 0
-    req = await request_json()
+    req = await get_request_json()
     if not req:
         ids = None
     else:
@@ -250,7 +252,6 @@ async def delete_chats(tenant_id):
             continue
         temp_dict = {"status": StatusEnum.INVALID.value}
         success_count += DialogService.update_by_id(id, temp_dict)
-        print(success_count, "$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$", flush=True)
 
     if errors:
         if success_count > 0:
@@ -286,7 +287,7 @@ def list_chat(tenant_id):
     chats = DialogService.get_list(tenant_id, page_number, items_per_page, orderby, desc, id, name)
     if not chats:
         return get_result(data=[])
-    list_assts = []
+    list_assistants = []
     key_mapping = {
         "parameters": "variables",
         "prologue": "opener",
@@ -320,5 +321,5 @@ def list_chat(tenant_id):
         del res["kb_ids"]
         res["datasets"] = kb_list
         res["avatar"] = res.pop("icon")
-        list_assts.append(res)
-    return get_result(data=list_assts)
+        list_assistants.append(res)
+    return get_result(data=list_assistants)
