@@ -23,12 +23,23 @@ from collections import Counter
 
 from api.db.services.document_service import DocumentService
 from api.db.services.file2document_service import File2DocumentService
-from common.settings import STORAGE_IMPL
+from common import settings
 
-# ⚠️ 延迟导入 PdfParser，避免启动时加载 OCR 模型
-# from deepdoc.parser import PdfParser as RAGFlowPdfParser
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_storage_initialized():
+    """Ensure STORAGE_IMPL is initialized before use"""
+    if settings.STORAGE_IMPL is None:
+        logger.warning("STORAGE_IMPL not initialized, calling init_settings()")
+        settings.init_settings()
+    
+    if settings.STORAGE_IMPL is None:
+        raise RuntimeError(
+            "STORAGE_IMPL is not initialized. Please ensure init_settings() "
+            "is called during application startup."
+        )
 
 
 class PowerRAGExtractService:
@@ -55,6 +66,9 @@ class PowerRAGExtractService:
             Dict containing extracted information and metadata
         """
         try:
+            # Ensure storage is initialized
+            _ensure_storage_initialized()
+            
             # Get document
             exist, doc = DocumentService.get_by_id(doc_id)
             if not exist:
@@ -62,7 +76,7 @@ class PowerRAGExtractService:
             
             # Get binary data and extract text
             bucket, name = File2DocumentService.get_storage_address(doc_id=doc_id)
-            binary = STORAGE_IMPL.get(bucket, name)
+            binary = settings.STORAGE_IMPL.get(bucket, name)
             
             if not binary:
                 raise ValueError(f"Document binary not found for {doc_id}")

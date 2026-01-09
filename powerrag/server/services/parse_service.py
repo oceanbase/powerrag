@@ -580,3 +580,100 @@ class PowerRAGParseService:
         
         return results
 
+    def _parse_to_markdown_for_task(self, doc_id: str = None, filename: str = None, 
+                                     binary: bytes = None, format_type: str = None,
+                                     config: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Parse document to Markdown for async task execution
+        
+        This is a wrapper method used by ParseToMdTaskManager for async execution.
+        It handles both doc_id-based and direct binary-based parsing.
+        
+        Args:
+            doc_id: Document ID (for database lookup)
+            filename: Filename (for direct binary parsing)
+            binary: Binary data (for direct binary parsing)
+            format_type: Format type (for direct binary parsing)
+            config: Parser configuration
+        
+        Returns:
+            Dict with parsed results:
+            {
+                "doc_id": "...",
+                "doc_name": "...",
+                "markdown": "...",
+                "markdown_length": 5000,
+                "images": {...},
+                "total_images": 2
+            }
+        """
+        if config is None:
+            config = {}
+        
+        # Case 1: Parse from doc_id (from database)
+        if doc_id:
+            # Get document from database
+            exist, doc = DocumentService.get_by_id(doc_id)
+            if not exist:
+                raise ValueError(f"Document {doc_id} not found")
+            
+            # Get binary data from storage
+            bucket, name = File2DocumentService.get_storage_address(doc_id=doc_id)
+            
+            if not bucket or not name:
+                raise ValueError(f"Invalid storage address for document {doc_id}: bucket={bucket}, name={name}")
+            
+            storage = STORAGE_IMPL
+            
+            if not storage:
+                raise ValueError("Storage implementation not available")
+            
+            try:
+                binary = storage.get(bucket, name)
+                if not binary:
+                    raise ValueError(f"Document binary data not found in storage: bucket={bucket}, name={name}")
+            except Exception as e:
+                logger.error(f"Failed to get binary for doc {doc_id}: {e}", exc_info=True)
+                raise ValueError(f"Failed to retrieve document binary: {e}")
+            
+            # Determine format
+            file_ext = Path(doc.name).suffix.lstrip('.').lower()
+            format_type_map = {
+                'pdf': 'pdf', 'docx': 'office', 'doc': 'office',
+                'xlsx': 'office', 'xls': 'office', 'pptx': 'office', 'ppt': 'office',
+                'html': 'html', 'htm': 'html',
+                'jpg': 'image', 'jpeg': 'image', 'png': 'image'
+            }
+            format_type = format_type_map.get(file_ext, 'pdf')
+            filename = doc.name
+        
+        # Case 2: Parse from direct binary (filename, binary, format_type provided)
+        elif filename and binary is not None and format_type:
+            doc_id = None
+        else:
+            raise ValueError("Must provide either doc_id or (filename, binary, format_type)")
+        
+        # Parse to markdown
+        md_content, images = self._parse_to_markdown(
+            filename=filename,
+            binary=binary,
+            format_type=format_type,
+            config=config
+        )
+        
+        # Prepare result
+        result = {
+            "markdown": md_content,
+            "markdown_length": len(md_content),
+            "images": images,
+            "total_images": len(images) if images else 0
+        }
+        
+        if doc_id:
+            result["doc_id"] = doc_id
+            result["doc_name"] = filename
+        else:
+            result["doc_name"] = filename
+        
+        return result
+

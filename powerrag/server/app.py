@@ -14,43 +14,38 @@
 #  limitations under the License.
 #
 
-"""PowerRAG Flask Application Configuration"""
+"""PowerRAG Quart Application Configuration"""
 
 import logging
 import json
-from flask import Flask
-from flask.json.provider import DefaultJSONProvider
-from flask_cors import CORS
+from quart import Quart
+from quart_cors import cors
 from api.utils.json_encode import CustomJSONEncoder
 
 logger = logging.getLogger(__name__)
 
 
-class CustomJSONProvider(DefaultJSONProvider):
-    """Custom JSON provider that supports Chinese characters without Unicode escaping"""
-    
-    def dumps(self, obj, **kwargs):
-        """Override dumps to ensure Chinese characters are not escaped"""
-        kwargs.setdefault('ensure_ascii', False)
-        kwargs.setdefault('cls', CustomJSONEncoder)
-        return json.dumps(obj, **kwargs)
-
-
 def create_app():
-    """Create and configure the PowerRAG Flask application"""
+    """Create and configure the PowerRAG Quart application"""
     
-    app = Flask(__name__)
+    app = Quart(__name__)
     
     # CORS configuration - allow requests from RAGFlow frontend
-    CORS(app, supports_credentials=True, max_age=2592000)
-    
-    # JSON encoder configuration
-    # Use custom JSON provider to ensure Chinese characters are displayed properly
-    app.json = CustomJSONProvider(app)
+    # Note: Cannot use allow_credentials=True with wildcard allow_origin="*"
+    # Since PowerRAG has its own API key authentication, we don't need credentials
+    app = cors(app, allow_origin="*", allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
     
     # Request configuration
     app.url_map.strict_slashes = False
     app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024 * 1024  # 1GB max upload
+    
+    # Custom JSON encoder for Chinese characters
+    @app.before_serving
+    async def setup_json_encoder():
+        """Setup custom JSON encoder"""
+        import functools
+        import json
+        json.dumps = functools.partial(json.dumps, cls=CustomJSONEncoder, ensure_ascii=False)
     
     # Register blueprints
     from powerrag.server.routes.powerrag_routes import powerrag_bp
@@ -61,10 +56,10 @@ def create_app():
     
     # Health check endpoint
     @app.route("/health", methods=["GET"])
-    def health_check():
+    async def health_check():
         return {"status": "ok", "service": "powerrag"}, 200
     
-    logger.info("PowerRAG Flask application created successfully")
+    logger.info("PowerRAG Quart application created successfully")
     
     return app
 

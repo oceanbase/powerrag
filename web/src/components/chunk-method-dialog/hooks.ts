@@ -1,4 +1,4 @@
-import { useSelectParserList } from '@/hooks/user-setting-hooks';
+import { useSelectParserList } from '@/hooks/use-user-setting-request';
 import { useCallback, useMemo } from 'react';
 
 const ParserListMap = new Map([
@@ -15,8 +15,6 @@ const ParserListMap = new Map([
       'one',
       'qa',
       'knowledge_graph',
-      'smart',
-      'regex',
     ],
   ],
   [
@@ -30,8 +28,6 @@ const ParserListMap = new Map([
       'qa',
       'manual',
       'knowledge_graph',
-      'smart',
-      'regex',
     ],
   ],
   [
@@ -54,7 +50,6 @@ const ParserListMap = new Map([
       'qa',
       'table',
       'knowledge_graph',
-      'regex',
     ],
   ],
   [
@@ -70,7 +65,10 @@ const ParserListMap = new Map([
       'knowledge_graph',
     ],
   ],
-  [['md'], ['naive', 'qa', 'knowledge_graph', 'smart', 'regex']],
+  [
+    ['md', 'mdx'],
+    ['naive', 'qa', 'knowledge_graph'],
+  ],
   [['json'], ['naive', 'knowledge_graph']],
   [['eml'], ['email']],
 ]);

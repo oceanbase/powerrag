@@ -47,6 +47,7 @@ export type SelectWithSearchFlagProps = {
   allowClear?: boolean;
   disabled?: boolean;
   placeholder?: string;
+  emptyData?: string;
 };
 
 function findLabelWithoutOptions(
@@ -78,6 +79,7 @@ export const SelectWithSearch = forwardRef<
       allowClear = false,
       disabled = false,
       placeholder = t('common.selectPlaceholder'),
+      emptyData = t('common.noDataFound'),
     },
     ref,
   ) => {
@@ -106,6 +108,19 @@ export const SelectWithSearch = forwardRef<
         return findLabelWithoutOptions(optionsWithoutOptions, value);
       }
     }, [options, value]);
+
+    const showSearch = useMemo(() => {
+      if (Array.isArray(options) && options.length > 5) {
+        return true;
+      }
+      if (Array.isArray(options)) {
+        const optionsNum = options.reduce((acc, option) => {
+          return acc + (option?.options?.length || 0);
+        }, 0);
+        return optionsNum > 5;
+      }
+      return false;
+    }, [options]);
 
     const handleSelect = useCallback(
       (val: string) => {
@@ -140,7 +155,7 @@ export const SelectWithSearch = forwardRef<
             ref={ref}
             disabled={disabled}
             className={cn(
-              '!bg-bg-input hover:bg-background border-border-button w-full  justify-between px-3 font-normal outline-offset-0 outline-none focus-visible:outline-[3px] [&_svg]:pointer-events-auto',
+              '!bg-bg-input hover:bg-background border-border-button w-full  justify-between px-3 font-normal outline-offset-0 outline-none focus-visible:outline-[3px] [&_svg]:pointer-events-auto group',
               triggerClassName,
             )}
           >
@@ -155,12 +170,12 @@ export const SelectWithSearch = forwardRef<
               {value && allowClear && (
                 <>
                   <XIcon
-                    className="h-4 mx-2 cursor-pointer text-text-disabled"
+                    className="h-4 mx-2 cursor-pointer text-text-disabled hidden group-hover:block"
                     onClick={handleClear}
                   />
                   <Separator
                     orientation="vertical"
-                    className="flex min-h-6 h-full"
+                    className=" min-h-6 h-full hidden group-hover:flex"
                   />
                 </>
               )}
@@ -173,24 +188,34 @@ export const SelectWithSearch = forwardRef<
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          className="border-input w-full min-w-[var(--radix-popper-anchor-width)] p-0"
+          className="border-border-button w-full min-w-[var(--radix-popper-anchor-width)] p-0"
           align="start"
         >
-          <Command>
-            <CommandInput placeholder={t('common.search') + '...'} />
-            <CommandList>
-              <CommandEmpty>{t('common.noDataFound')}</CommandEmpty>
+          <Command className="p-5">
+            {showSearch && (
+              <CommandInput
+                placeholder={t('common.search') + '...'}
+                className=" placeholder:text-text-disabled"
+              />
+            )}
+            <CommandList className="mt-2 outline-none">
+              <CommandEmpty>
+                <div dangerouslySetInnerHTML={{ __html: emptyData }}></div>
+              </CommandEmpty>
               {options.map((group, idx) => {
                 if (group.options) {
                   return (
                     <Fragment key={idx}>
-                      <CommandGroup heading={group.label}>
+                      <CommandGroup heading={group.label} className="mb-1">
                         {group.options.map((option) => (
                           <CommandItem
                             key={option.value}
                             value={option.value}
                             disabled={option.disabled}
                             onSelect={handleSelect}
+                            className={
+                              value === option.value ? 'bg-bg-card' : ''
+                            }
                           >
                             <span className="leading-none">{option.label}</span>
 
@@ -209,6 +234,9 @@ export const SelectWithSearch = forwardRef<
                       value={group.value}
                       disabled={group.disabled}
                       onSelect={handleSelect}
+                      className={cn('mb-1 min-h-10 ', {
+                        'bg-bg-card ': value === group.value,
+                      })}
                     >
                       <span className="leading-none">{group.label}</span>
 

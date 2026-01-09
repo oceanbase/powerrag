@@ -42,7 +42,7 @@ PowerRAG extends RAGFlow's document processing capabilities with multi-engine an
 
 - **Multi-Engine OCR Support**: Integrates MinerU and Dots.OCR for complex document recognition and text extraction
 - **Multiple Chunking Strategies**: Supports title-based, regex-based, and intelligent chunking algorithms to improve content organization and retrieval efficiency
-- **Structured Information Extraction**: Implements structured information recognition and extraction based on [LangExtract](https://github.com/langextract/langextract), supporting extraction of tables, fields, entities, and other structured content from documents, providing data foundation for knowledge graphs and semantic retrieval
+- **Structured Information Extraction**: Implements structured information recognition and extraction based on [LangExtract](https://github.com/google/langextract), supporting extraction of tables, fields, entities, and other structured content from documents, providing data foundation for knowledge graphs and semantic retrieval
 
 ### Hybrid Retrieval
 

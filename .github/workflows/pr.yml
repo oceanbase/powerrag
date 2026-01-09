@@ -1,0 +1,79 @@
+name: pr
+
+on:
+  pull_request:
+    paths-ignore:
+      - "**/*.md"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Free disk space
+        uses: kfir4444/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Prepare Docker
+        run: |
+          sudo mkdir -p /mnt/powerrag /mnt/docker
+          echo '{"data-root": "/mnt/docker"}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl daemon-reload
+          sudo systemctl restart docker
+          sleep 2
+          docker info > /dev/null || (echo "Docker restart failed" && exit 1)
+          sudo chmod 777 /mnt/powerrag
+          sudo mv * .* /mnt/powerrag 2>/dev/null || true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Prepare dependencies
+        run: |
+          echo "Setting up Python..."
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-pip
+
+          echo "Installing Python dependencies..."
+          python3 -m pip install --upgrade pip
+          python3 -m pip install huggingface-hub nltk
+
+          echo "Downloading dependencies..."
+          cd /mnt/powerrag
+          python3 download_deps.py
+
+          echo "Dependencies prepared successfully"
+
+      - name: Build dependency image
+        run: |
+          echo "Building dependency image..."
+          docker build \
+            --file /mnt/powerrag/Dockerfile.deps \
+            --tag infiniflow/ragflow_deps:latest \
+            /mnt/powerrag
+          echo "Dependency image built successfully"
+
+      - name: Build and push image
+        run: |
+          IMAGE_TAG=powerrag:pr-${{ github.event.pull_request.number }}
+          echo "Commit: ${{ github.sha }} | Tag: ${IMAGE_TAG}"
+          docker build \
+            --build-arg LIGHTEN=1 \
+            --file /mnt/powerrag/Dockerfile \
+            --tag ${IMAGE_TAG} \
+            /mnt/powerrag
+          echo "Built: ${IMAGE_TAG} (not pushed)"
