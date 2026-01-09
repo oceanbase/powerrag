@@ -213,4 +213,10 @@ nginx_conf/
 logs/
 pods/
 upload_wiki_json.pid
+<<<<<<< HEAD
 >>>>>>> d641c4e6 (feat: add deploy.sh for startup from source code; support start multi  ragflow_server in dcoker and deploy.sh)
+=======
+.ragflow_secret_key
+setup_tools_venv.sh
+build_tools_bundle.sh
+>>>>>>> fc88e390 (feat: optimize upload_document using batch; fix sevral bugs in deploy.sh and entrypoint.sh)

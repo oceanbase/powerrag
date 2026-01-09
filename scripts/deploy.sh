@@ -179,6 +179,61 @@ function is_process_running() {
   [[ -n "${pid}" ]] && ps -p "${pid}" >/dev/null 2>&1
 }
 
+function _pids_listening_on_port() {
+  local port="$1"
+  local pids=""
+  if command -v lsof >/dev/null 2>&1; then
+    # -t: pids only; LISTEN only
+    pids="$(lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null | tr '\n' ' ' | xargs echo 2>/dev/null || true)"
+  elif command -v fuser >/dev/null 2>&1; then
+    # fuser output format varies; best-effort
+    pids="$(fuser -n tcp "${port}" 2>/dev/null | tr '\n' ' ' | xargs echo 2>/dev/null || true)"
+  fi
+  echo "${pids}"
+}
+
+function _pid_cwd_is_workspace() {
+  local pid="$1"
+  local cwd=""
+  if [[ -r "/proc/${pid}/cwd" ]]; then
+    cwd="$(readlink -f "/proc/${pid}/cwd" 2>/dev/null || true)"
+  fi
+  [[ -n "${cwd}" ]] && [[ "${cwd}" == "${WORKSPACE_FOLDER}"* ]]
+}
+
+function _kill_port_if_matches_cmd() {
+  local port="$1"
+  local must_contain="$2"  # substring to match in cmdline
+  local name="${3:-}"
+
+  local pids
+  pids="$(_pids_listening_on_port "${port}")"
+  [[ -n "${pids}" ]] || return 0
+
+  local pid args
+  for pid in ${pids}; do
+    args="$(ps -p "${pid}" -o args= 2>/dev/null || true)"
+    if [[ -z "${args}" ]]; then
+      continue
+    fi
+    # Kill only when we're confident it's our workspace process.
+    # Some environments may already have other ragflow_server processes running as root.
+    local match=0
+    if [[ "${args}" == *"${must_contain}"* ]]; then
+      match=1
+    elif _pid_cwd_is_workspace "${pid}" && [[ "${args}" == *"api/ragflow_server.py"* ]]; then
+      match=1
+    fi
+    [[ "${match}" -eq 1 ]] || continue
+    echo "[stop] ${name:-port ${port}}: killing listener pid=${pid} (matched: ${must_contain})"
+    kill "${pid}" 2>/dev/null || true
+    sleep 0.3
+    if is_process_running "${pid}"; then
+      kill -9 "${pid}" 2>/dev/null || true
+    fi
+  done
+}
+
 function _default_host_id() {
   local hn
   hn="$(hostname)"
@@ -244,6 +299,24 @@ function _common_env_kv() {
   echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-/usr/lib/x86_64-linux-gnu/:/usr/lib64/}"
   echo "TIKTOKEN_CACHE_DIR=${WORKSPACE_FOLDER}"
   echo "LIGHTEN=${LIGHTEN:-1}"
+
+  # Enable HTTP access logs from Flask/Werkzeug by default.
+  # - If LOG_LEVELS is empty: set root=INFO,werkzeug=INFO
+  # - If LOG_LEVELS exists but has no werkzeug: append werkzeug=INFO
+  # - If LOG_LEVELS exists but has no root: prepend root=INFO
+  local _log_levels="${LOG_LEVELS:-}"
+  if [[ -z "${_log_levels}" ]]; then
+    _log_levels="root=INFO,werkzeug=INFO"
+  else
+    if [[ "${_log_levels}" != *"werkzeug="* ]]; then
+      _log_levels="${_log_levels},werkzeug=INFO"
+    fi
+    if [[ "${_log_levels}" != *"root="* ]]; then
+      _log_levels="root=INFO,${_log_levels}"
+    fi
+  fi
+  echo "LOG_LEVELS=${_log_levels}"
+
   echo "http_proxy="
   echo "https_proxy="
   echo "no_proxy="
@@ -294,6 +367,8 @@ function _start_process() {
   echo "[ok] started ${name} (PID: ${bg_pid})"
 }
 
+
+
 function _stop_by_pidfile() {
   local name="$1"
   local pid_file="$2"
@@ -303,6 +378,12 @@ function _stop_by_pidfile() {
   fi
   local pid
   pid="$(cat "${pid_file}" 2>/dev/null || true)"
+  local port=""
+  # Extract port from pidfile name for ragflow_server (e.g., ragflow_server_9390.pid -> 9390)
+  if [[ "${name}" == "ragflow_server" ]] && [[ "${pid_file}" =~ ragflow_server_([0-9]+)\.pid ]]; then
+    port="${BASH_REMATCH[1]}"
+  fi
+  
   if is_process_running "${pid}"; then
     echo "[stop] ${name} (PID: ${pid})"
     kill "${pid}" 2>/dev/null || true
@@ -313,12 +394,154 @@ function _stop_by_pidfile() {
   else
     echo "[skip] ${name} not running (stale pid: ${pid})"
   fi
+  
+  # For ragflow_server, check if port is still listening (child process may have outlived parent)
+  if [[ -n "${port}" ]] && _port_is_listening "${port}"; then
+    local listening_pids
+    listening_pids="$(_pids_listening_on_port "${port}")"
+    if [[ -n "${listening_pids}" ]]; then
+      local child_pid
+      for child_pid in ${listening_pids}; do
+        # Only kill processes from our workspace
+        if _pid_cwd_is_workspace "${child_pid}"; then
+          local args
+          args="$(ps -p "${child_pid}" -o args= 2>/dev/null || true)"
+          if [[ "${args}" == *"api/ragflow_server.py"* ]]; then
+            echo "[stop] ${name} (child PID: ${child_pid} on port ${port})"
+            kill "${child_pid}" 2>/dev/null || true
+            sleep 0.5
+            if is_process_running "${child_pid}"; then
+              kill -9 "${child_pid}" 2>/dev/null || true
+            fi
+          fi
+        fi
+      done
+    fi
+  fi
+  
   rm -f "${pid_file}"
 }
 
 function _validate_port() {
   local port="$1"
   [[ "${port}" =~ ^[0-9]+$ ]] && [[ "${port}" -ge 1 ]] && [[ "${port}" -le 65535 ]]
+}
+
+function _port_is_listening() {
+  local port="$1"
+  # ss without -p doesn't require extra privileges
+  ss -ltn "( sport = :${port} )" 2>/dev/null | grep -q ":${port} "
+}
+
+function _pid_from_pidfile() {
+  local pid_file="$1"
+  [[ -f "${pid_file}" ]] || return 1
+  cat "${pid_file}" 2>/dev/null | tr -d '[:space:]'
+}
+
+function _pidfile_is_running() {
+  local pid_file="$1"
+  local pid
+  pid="$(_pid_from_pidfile "${pid_file}")"
+  [[ -n "${pid}" ]] && is_process_running "${pid}"
+}
+
+function _preflight_port_or_running() {
+  # If pidfile indicates the component is already running, treat as OK (will be skipped by start_*).
+  # Otherwise, the port must be free; we do NOT stop/kill anything in start.
+  local name="$1"
+  local pid_file="$2"
+  local port="$3"
+  local hint="$4"
+
+  if _pidfile_is_running "${pid_file}"; then
+    return 0
+  fi
+
+  if _port_is_listening "${port}"; then
+    echo "ERROR: ${name} port ${port} is already in use. start will not stop existing processes." >&2
+    echo "Hint: inspect listener: ss -ltnp '( sport = :${port} )'  (or lsof -nP -iTCP:${port} -sTCP:LISTEN)" >&2
+    [[ -n "${hint}" ]] && echo "Hint: ${hint}" >&2
+    return 1
+  fi
+  return 0
+}
+
+function _preflight_start_all() {
+  # Goal: if anything would fail to start due to port conflicts, fail BEFORE starting any new process.
+  local fail=0
+
+  # ragflow_server instances
+  local idx port pid_file
+  for (( idx=0; idx<${SVR_COUNT}; idx++ )); do
+    if [[ "${idx}" -eq 0 ]]; then
+      port="${SVR_HTTP_PORT}"
+    else
+      port=$((SVR_EXTRA_BASE_HTTP_PORT + idx - 1))
+    fi
+    pid_file="${PID_DIR}/ragflow_server_${port}.pid"
+    if ! _preflight_port_or_running "ragflow_server" "${pid_file}" "${port}" "pick another port: --svr-http-port / --svr-extra-base-http-port (or stop/restart first)"; then
+      fail=1
+    fi
+  done
+
+  # nginx web frontend/proxy (if enabled)
+  if [[ "${ENABLE_WEBSERVER}" -eq 1 ]]; then
+    if ! _preflight_port_or_running "nginx(web)" "${PID_DIR}/web_frontend.pid" "${WEB_PORT}" "pick another port: --web-port=<free_port> (or stop/restart first)"; then
+      fail=1
+    fi
+  fi
+
+  # admin_server (if enabled)
+  if [[ "${ENABLE_ADMIN_SERVER}" -eq 1 ]]; then
+    if ! _preflight_port_or_running "admin_server" "${PID_DIR}/admin_server.pid" "${ADMIN_SVR_HTTP_PORT}" "pick another port: --admin-svr-http-port=<free_port> (or stop/restart first)"; then
+      fail=1
+    fi
+  fi
+
+  # mcp_server (if enabled)
+  if [[ "${ENABLE_MCP_SERVER}" -eq 1 ]]; then
+    if ! _preflight_port_or_running "mcp_server" "${PID_DIR}/mcp_server.pid" "${MCP_PORT}" "pick another port: --mcp-port=<free_port> (or disable mcp_server)"; then
+      fail=1
+    fi
+  fi
+
+  # powerrag_server (if enabled)
+  if [[ "${ENABLE_POWERRAG_SERVER}" -eq 1 ]]; then
+    if ! _preflight_port_or_running "powerrag_server" "${PID_DIR}/powerrag_server.pid" "${POWERRAG_PORT}" "pick another port: --powerrag-port=<free_port> (or disable powerrag_server)"; then
+      fail=1
+    fi
+  fi
+
+  [[ "${fail}" -eq 0 ]]
+}
+
+function _check_ports_available() {
+  # Fail-fast if any target port is already in use by another service.
+  # We consider it "available" only if nothing is listening.
+  local -a ports=("$@")
+  local port
+  for port in "${ports[@]}"; do
+    if ! _port_is_listening "${port}"; then
+      continue
+    fi
+
+    echo "ERROR: port ${port} is already in use by another service." >&2
+    echo "Hint: check with: ss -ltnp '( sport = :${port} )'  (or run as root to see process)" >&2
+    if [[ "${port}" -eq "${ADMIN_SVR_HTTP_PORT}" ]]; then
+      echo "Hint: ${port} is the admin_server default port (ADMIN_SVR_HTTP_PORT). Use: --admin-svr-http-port=<free_port>" >&2
+    elif [[ "${port}" -eq "${WEB_PORT}" ]]; then
+      echo "Hint: ${port} is the nginx web port (WEB_PORT). Use: --web-port=<free_port>" >&2
+    elif [[ "${port}" -eq "${MCP_PORT}" ]]; then
+      echo "Hint: ${port} is the mcp_server port (MCP_PORT). Use: --mcp-port=<free_port> or disable mcp_server" >&2
+    elif [[ "${port}" -eq "${POWERRAG_PORT}" ]]; then
+      echo "Hint: ${port} is the powerrag_server port (POWERRAG_PORT). Use: --powerrag-port=<free_port> or disable powerrag_server" >&2
+    else
+      echo "Hint: if you intend to run multiple ragflow instances, use different ports: --svr-http-port / --svr-extra-base-http-port (and also consider --admin-svr-http-port)" >&2
+    fi
+    return 1
+  done
+  return 0
 }
 
 function _check_port_conflicts() {
@@ -418,7 +641,13 @@ PY
 function _prepare_multi_ragflow_confs() {
   local idx port conf_name conf_path
   for (( idx=0; idx<${SVR_COUNT}; idx++ )); do
-    conf_name="service_conf_ragflow_${idx}.yaml"
+    # Align with docker/entrypoint.sh: main instance uses base service conf directly;
+    # extra instances use generated per-instance confs.
+    if [[ "${idx}" -eq 0 ]]; then
+      conf_name="${GLOBAL_SERVICE_CONF}"
+    else
+      conf_name="service_conf_ragflow_${idx}.yaml"
+    fi
     conf_path="${CONF_DIR}/${conf_name}"
     if [[ "${idx}" -eq 0 ]]; then
       port="${SVR_HTTP_PORT}"
@@ -439,7 +668,11 @@ function start_ragflow_servers() {
 
   local idx port conf_name pid_file
   for (( idx=0; idx<${SVR_COUNT}; idx++ )); do
-    conf_name="service_conf_ragflow_${idx}.yaml"
+    if [[ "${idx}" -eq 0 ]]; then
+      conf_name="${GLOBAL_SERVICE_CONF}"
+    else
+      conf_name="service_conf_ragflow_${idx}.yaml"
+    fi
     if [[ "${idx}" -eq 0 ]]; then
       port="${SVR_HTTP_PORT}"
     else
@@ -595,14 +828,53 @@ function start_web() {
     fi
   fi
 
-  local server_port_for_web="${SVR_HTTP_PORT}"
   local admin_port_for_web="${ADMIN_SVR_HTTP_PORT}"
 
   # nginx temp dirs (must be writable for non-root runs)
   local nginx_tmp_dir="${NGINX_CONF_DIR}/tmp"
   mkdir -p "${nginx_tmp_dir}/client_body" "${nginx_tmp_dir}/proxy" "${nginx_tmp_dir}/fastcgi" "${nginx_tmp_dir}/uwsgi" "${nginx_tmp_dir}/scgi"
 
+  # Align with docker/entrypoint.sh nginx logic:
+  # - generate upstream include files so nginx can proxy/load-balance to all instances
+  # - generate proxy.conf snippet for consistent proxy headers/settings
+  : > "${NGINX_CONF_DIR}/ragflow_upstream.conf"
+  : > "${NGINX_CONF_DIR}/admin_upstream.conf"
+  echo "server ${ADMIN_HOST_FOR_WEB}:${admin_port_for_web};" >> "${NGINX_CONF_DIR}/admin_upstream.conf"
+
+  local idx port
+  for (( idx=0; idx<${SVR_COUNT}; idx++ )); do
+    if [[ "${idx}" -eq 0 ]]; then
+      port="${SVR_HTTP_PORT}"
+    else
+      port=$((SVR_EXTRA_BASE_HTTP_PORT + idx - 1))
+    fi
+    echo "server ${SERVER_HOST_FOR_WEB}:${port};" >> "${NGINX_CONF_DIR}/ragflow_upstream.conf"
+  done
+
+  cat > "${NGINX_CONF_DIR}/proxy.conf" <<'EOF'
+proxy_set_header Host $host;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_http_version 1.1;
+proxy_set_header Connection "";
+proxy_buffering off;
+proxy_read_timeout 3600s;
+proxy_send_timeout 3600s;
+proxy_buffer_size 1024k;
+proxy_buffers 16 1024k;
+proxy_busy_buffers_size 2048k;
+proxy_temp_file_write_size 2048k;
+EOF
+
   cat > "${NGINX_CONF_DIR}/ragflow.conf" <<EOF
+upstream ragflow_upstream {
+    include ${NGINX_CONF_DIR}/ragflow_upstream.conf;
+}
+
+upstream admin_upstream {
+    include ${NGINX_CONF_DIR}/admin_upstream.conf;
+}
+
 server {
     listen ${WEB_PORT};
     server_name _;
@@ -616,27 +888,13 @@ server {
     gzip_disable "MSIE [1-6]\\.";
 
     location ~ ^/api/v1/admin {
-        proxy_pass http://${ADMIN_HOST_FOR_WEB}:${admin_port_for_web};
-        proxy_set_header Host \$host;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_buffering off;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
+        proxy_pass http://admin_upstream;
+        include ${NGINX_CONF_DIR}/proxy.conf;
     }
 
     location ~ ^/(v1|api) {
-        proxy_pass http://${SERVER_HOST_FOR_WEB}:${server_port_for_web};
-        proxy_set_header Host \$host;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_buffering off;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
+        proxy_pass http://ragflow_upstream;
+        include ${NGINX_CONF_DIR}/proxy.conf;
     }
 
     location / {
@@ -661,6 +919,7 @@ events {
 http {
     include       /etc/nginx/mime.types;
     default_type  application/octet-stream;
+
 
     # temp dirs (avoid /var/lib/nginx/tmp/* which requires root)
     client_body_temp_path ${nginx_tmp_dir}/client_body;
@@ -742,6 +1001,18 @@ function stop_all() {
   done
   rm -f "${PID_DIR}/ragflow_server.pid" 2>/dev/null || true
 
+  # If pidfiles were stale, best-effort kill listeners by port (only if cmd matches our scripts).
+  local idx port
+  for (( idx=0; idx<${SVR_COUNT}; idx++ )); do
+    if [[ "${idx}" -eq 0 ]]; then
+      port="${SVR_HTTP_PORT}"
+    else
+      port=$((SVR_EXTRA_BASE_HTTP_PORT + idx - 1))
+    fi
+    _kill_port_if_matches_cmd "${port}" "${RAGFLOW_SERVER_PY}" "ragflow_server:${port}"
+  done
+  _kill_port_if_matches_cmd "${ADMIN_SVR_HTTP_PORT}" "${ADMIN_SERVER_PY}" "admin_server"
+
   # optional web frontend nginx
   stop_web || true
 }
@@ -762,17 +1033,21 @@ function clear_runtime_files() {
   echo "=== clear: stop services and remove generated logs/configs/pids (best-effort) ==="
 
   # stop services started by this script (based on pids/)
+  # Only processes with pidfiles in PID_DIR are managed by this deploy.sh instance.
+  # Other ragflow_server processes on the same machine may be managed by other deploy.sh instances.
   stop_all || true
 
   # generated per-instance service confs
   rm -f "${CONF_DIR}"/service_conf_ragflow_*.yaml 2>/dev/null || true
+  # generated secret key file (align with docker/entrypoint.sh)
+  rm -f "${CONF_DIR}/.ragflow_secret_key" 2>/dev/null || true
 
   # remove runtime dirs entirely (user expectation for clear)
   rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
   rm -rf "${PID_DIR}" 2>/dev/null || true
   rm -rf "${LOG_DIR}" 2>/dev/null || true
 
-  echo "[ok] cleared: logs/, pids/, nginx_conf/, conf/service_conf_ragflow_*.yaml"
+  echo "[ok] cleared: logs/, pids/, nginx_conf/, conf/service_conf_ragflow_*.yaml, conf/.ragflow_secret_key"
 }
 
 function status() {
@@ -780,42 +1055,164 @@ function status() {
 
   echo "config:"
   echo "  - service_conf(base) = conf/${GLOBAL_SERVICE_CONF}"
-  echo "  - ragflow main port  = ${SVR_HTTP_PORT}"
+  # Best-effort show ports from the base service conf (more accurate than defaults when status is run without flags).
+  local base_ragflow_port="${SVR_HTTP_PORT}"
+  local base_admin_port="${ADMIN_SVR_HTTP_PORT}"
+  if [[ -f "${CONF_DIR}/${GLOBAL_SERVICE_CONF}" ]] && [[ -x "${PYTHON}" ]]; then
+    local _ports
+    _ports="$("${PYTHON}" - <<PY 2>/dev/null || true
+import os
+from ruamel.yaml import YAML
+conf = os.path.join(${CONF_DIR@Q}, ${GLOBAL_SERVICE_CONF@Q})
+yaml = YAML(typ="safe")
+with open(conf, "r", encoding="utf-8") as f:
+    data = yaml.load(f) or {}
+rag = (data.get("ragflow") or {}).get("http_port")
+adm = (data.get("admin") or {}).get("http_port")
+print(f"{rag if rag is not None else ''}\\t{adm if adm is not None else ''}")
+PY
+)"
+    if [[ -n "${_ports}" ]]; then
+      base_ragflow_port="$(echo "${_ports}" | awk -F'\t' '{print $1}')"
+      base_admin_port="$(echo "${_ports}" | awk -F'\t' '{print $2}')"
+      [[ -n "${base_ragflow_port}" ]] || base_ragflow_port="${SVR_HTTP_PORT}"
+      [[ -n "${base_admin_port}" ]] || base_admin_port="${ADMIN_SVR_HTTP_PORT}"
+    fi
+  fi
+
+  echo "  - ragflow main port  = ${base_ragflow_port}"
   echo "  - ragflow extra base = ${SVR_EXTRA_BASE_HTTP_PORT}"
-  echo "  - admin port         = ${ADMIN_SVR_HTTP_PORT}"
+  echo "  - admin port         = ${base_admin_port}"
   echo "  - mcp port           = ${MCP_PORT}"
   echo "  - web port           = ${WEB_PORT}"
 
+  # Build a port -> conf filename map from existing conf files (robust even when status is run with different flags).
+  declare -A _ragflow_port_to_conf=()
+  if [[ -x "${PYTHON}" ]]; then
+    while IFS=$'\t' read -r _p _c; do
+      [[ -n "${_p}" && -n "${_c}" ]] || continue
+      _ragflow_port_to_conf["${_p}"]="${_c}"
+    done < <("${PYTHON}" - <<PY 2>/dev/null || true
+import glob, os
+from ruamel.yaml import YAML
+
+conf_dir = ${CONF_DIR@Q}
+base = os.path.join(conf_dir, ${GLOBAL_SERVICE_CONF@Q})
+files = []
+if os.path.isfile(base):
+    files.append(base)
+files.extend(sorted(glob.glob(os.path.join(conf_dir, "service_conf_ragflow_*.yaml"))))
+
+yaml = YAML(typ="safe")
+for f in files:
+    try:
+        with open(f, "r", encoding="utf-8") as fh:
+            data = yaml.load(fh) or {}
+        port = (data.get("ragflow") or {}).get("http_port")
+        if port is None:
+            continue
+        print(f"{int(port)}\t{os.path.basename(f)}")
+    except Exception:
+        continue
+PY
+)
+  fi
+
   # ragflow
   echo "ragflow_server:"
-  local any=0
+  local found=0
   local f pid port idx conf_name conf_path log_path
   for f in "${PID_DIR}"/ragflow_server_*.pid; do
     [[ -f "${f}" ]] || continue
+    found=1
     port="$(basename "${f}" | sed 's/ragflow_server_\(.*\)\.pid/\1/')"
     pid="$(cat "${f}" 2>/dev/null || true)"
 
     # best-effort infer conf name from port
-    conf_name="(unknown)"
-    if [[ "${port}" == "${SVR_HTTP_PORT}" ]]; then
-      conf_name="service_conf_ragflow_0.yaml"
-    elif [[ "${port}" =~ ^[0-9]+$ ]]; then
-      idx=$(( port - SVR_EXTRA_BASE_HTTP_PORT + 1 ))
-      if [[ "${idx}" -ge 1 ]]; then
-        conf_name="service_conf_ragflow_${idx}.yaml"
+    conf_name="${_ragflow_port_to_conf[${port}]:-(unknown)}"
+    # Backward compatible fallback when conf map isn't available
+    if [[ "${conf_name}" == "(unknown)" ]]; then
+      if [[ "${port}" == "${SVR_HTTP_PORT}" ]]; then
+        conf_name="${GLOBAL_SERVICE_CONF}"
+      elif [[ "${port}" =~ ^[0-9]+$ ]]; then
+        idx=$(( port - SVR_EXTRA_BASE_HTTP_PORT + 1 ))
+        if [[ "${idx}" -ge 1 ]]; then
+          conf_name="service_conf_ragflow_${idx}.yaml"
+        fi
       fi
     fi
     conf_path="conf/${conf_name}"
     log_path="logs/ragflow_server_${port}.log"
 
+    # Try to get actual listening port from process's service conf file
+    actual_port="${port}"
+    if is_process_running "${pid}" && [[ -f "${CONF_DIR}/${conf_name}" ]] && [[ -x "${PYTHON}" ]]; then
+      actual_port="$("${PYTHON}" - <<PY 2>/dev/null || echo "${port}"
+import os
+from ruamel.yaml import YAML
+conf = os.path.join(${CONF_DIR@Q}, ${conf_name@Q})
+yaml = YAML(typ="safe")
+try:
+    with open(conf, "r", encoding="utf-8") as f:
+        data = yaml.load(f) or {}
+    p = (data.get("ragflow") or {}).get("http_port")
+    if p is not None:
+        print(int(p))
+except Exception:
+    pass
+PY
+)"
+      [[ -n "${actual_port}" ]] || actual_port="${port}"
+    fi
+
+    # Get actual process listening on the port (may be different from pidfile PID if it's a child process)
+    local actual_pid="${pid}"
+    local listening_pids
+    listening_pids="$(_pids_listening_on_port "${actual_port}")"
+    if [[ -n "${listening_pids}" ]]; then
+      # Prefer the PID that matches our workspace and is a ragflow_server process
+      local candidate_pid
+      for candidate_pid in ${listening_pids}; do
+        if _pid_cwd_is_workspace "${candidate_pid}"; then
+          local args
+          args="$(ps -p "${candidate_pid}" -o args= 2>/dev/null || true)"
+          if [[ "${args}" == *"api/ragflow_server.py"* ]]; then
+            actual_pid="${candidate_pid}"
+            break
+          fi
+        fi
+      done
+      # If no match found, use first listening PID
+      if [[ "${actual_pid}" == "${pid}" ]] && [[ -n "${listening_pids}" ]]; then
+        actual_pid="$(echo "${listening_pids}" | awk '{print $1}')"
+      fi
+    fi
+
+    # Check if pidfile process or actual listening process is running
+    local pidfile_running=0
+    local listening_running=0
     if is_process_running "${pid}"; then
-      any=1
-      echo "  - [ok] port=${port} pid=${pid} conf=${conf_path} log=${log_path}"
+      pidfile_running=1
+    fi
+    if [[ "${actual_pid}" != "${pid}" ]] && is_process_running "${actual_pid}"; then
+      listening_running=1
+    fi
+
+    if [[ "${pidfile_running}" -eq 1 ]] || [[ "${listening_running}" -eq 1 ]]; then
+      local port_info="${actual_port}"
+      if [[ "${actual_port}" != "${port}" ]]; then
+        port_info="${actual_port} (pidfile=${port})"
+      fi
+      local pid_info="${actual_pid}"
+      if [[ "${actual_pid}" != "${pid}" ]]; then
+        pid_info="${actual_pid} (pidfile=${pid})"
+      fi
+      echo "  - [ok] port=${port_info} pid=${pid_info} conf=${conf_path} log=${log_path}"
     else
       echo "  - [down] port=${port} pid=${pid} conf=${conf_path} log=${log_path}"
     fi
   done
-  if [[ "${any}" -eq 0 ]]; then
+  if [[ "${found}" -eq 0 ]]; then
     echo "  - (none)"
   fi
 
@@ -835,13 +1232,13 @@ function status() {
 
   # task executors
   echo "task_executor:"
-  any=0
+  found=0
   local args consumer_arg logf
   for f in "${PID_DIR}"/task_executor_*.pid; do
     [[ -f "${f}" ]] || continue
+    found=1
     pid="$(cat "${f}" 2>/dev/null || true)"
     if is_process_running "${pid}"; then
-      any=1
       args="$(ps -p "${pid}" -o args= 2>/dev/null || true)"
       consumer_arg="$(echo "${args}" | awk '{print $NF}')"
       # If no consumer arg provided, fallback to pid-file id.
@@ -854,7 +1251,7 @@ function status() {
       echo "  - [down] id=$(basename "${f}") pid=${pid}"
     fi
   done
-  if [[ "${any}" -eq 0 ]]; then
+  if [[ "${found}" -eq 0 ]]; then
     echo "  - (none)"
   fi
 
@@ -995,17 +1392,26 @@ for arg in "$@"; do
   esac
 done
 
-# Validate ports early (best-effort)
-for p in "${SVR_HTTP_PORT}" "${SVR_EXTRA_BASE_HTTP_PORT}" "${ADMIN_SVR_HTTP_PORT}" "${MCP_PORT}" "${POWERRAG_PORT}" "${WEB_PORT}"; do
-  if ! _validate_port "${p}"; then
-    echo "ERROR: invalid port: ${p}" >&2
+# Port validations / conflict checks / occupancy preflight should only block `start`.
+# Other actions (stop/status/clear/help) must not fail just because some default ports are occupied by unrelated services.
+if [[ "${ACTION}" == "start" ]]; then
+  # Validate ports early (best-effort)
+  for p in "${SVR_HTTP_PORT}" "${SVR_EXTRA_BASE_HTTP_PORT}" "${ADMIN_SVR_HTTP_PORT}" "${MCP_PORT}" "${POWERRAG_PORT}" "${WEB_PORT}"; do
+    if ! _validate_port "${p}"; then
+      echo "ERROR: invalid port: ${p}" >&2
+      exit 1
+    fi
+  done
+
+  # Check for duplicates/conflicts within our configured ports
+  if ! _check_port_conflicts; then
     exit 1
   fi
-done
 
-# Check for port conflicts
-if ! _check_port_conflicts; then
-  exit 1
+  # Preflight all components (atomic start): if anything would fail, don't start anything new.
+  if ! _preflight_start_all; then
+    exit 1
+  fi
 fi
 
 # -----------------------------------------------------------------------------

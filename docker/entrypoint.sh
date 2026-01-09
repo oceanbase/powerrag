@@ -283,13 +283,15 @@ function _prepare_multi_ragflow_confs() {
     # Create per-instance configs
     local idx port conf_name conf_path
     for (( idx=0; idx<${SVR_COUNT}; idx++ )); do
-        conf_name="service_conf_ragflow_${idx}.yaml"
-        conf_path="${CONF_DIR}/${conf_name}"
+       
         if [[ "${idx}" -eq 0 ]]; then
             port="${SVR_HTTP_PORT}"
+            conf_name="local.service_conf.yaml"
         else
             port=$((SVR_EXTRA_BASE_HTTP_PORT + idx - 1))
+            conf_name="service_conf_ragflow_${port}.yaml"
         fi
+        conf_path="${CONF_DIR}/${conf_name}"
         render_service_conf "${conf_path}" "${port}" "${ADMIN_SVR_HTTP_PORT}"
     done
 }
@@ -319,11 +321,12 @@ function start_ragflow_servers() {
 
     local idx port conf_name
     for (( idx=0; idx<${SVR_COUNT}; idx++ )); do
-        conf_name="service_conf_ragflow_${idx}.yaml"
         if [[ "${idx}" -eq 0 ]]; then
             port="${SVR_HTTP_PORT}"
+            conf_name="local.service_conf.yaml"
         else
             port=$((SVR_EXTRA_BASE_HTTP_PORT + idx - 1))
+            conf_name="service_conf_ragflow_${port}.yaml"
         fi
         echo "server 127.0.0.1:${port};" >> /etc/nginx/conf.d/ragflow_upstream.conf
         _start_ragflow_instance "${idx}" "${port}" "${conf_name}"
