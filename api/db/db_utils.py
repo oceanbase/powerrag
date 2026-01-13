@@ -63,8 +63,9 @@ def bulk_insert_into_db(model, data_source, replace_on_conflict=False):
     # don't create/close a new connection context here.
     if getattr(DB, "is_closed", lambda: True)():
         with DB.connection_context():
-            return _do_insert()
-    return _do_insert()
+            _do_insert()
+    else:
+        _do_insert()
 
 
 def get_dynamic_db_model(base, job_id):

@@ -14,7 +14,6 @@
 #  limitations under the License.
 #
 import datetime
-import io
 import json
 import logging
 import pathlib
@@ -36,10 +35,11 @@ from api.db.services.file_service import FileService
 from api.db.services.knowledgebase_service import KnowledgebaseService
 from api.db.services.llm_service import LLMBundle
 from api.db.services.tenant_llm_service import TenantLLMService
-from api.db.services.task_service import TaskService, queue_tasks, cancel_all_task_of, queue_tasks_batch
+from api.db.services.task_service import cancel_all_task_of, queue_tasks_batch
 from common.metadata_utils import meta_filter, convert_conditions
 from api.utils.api_utils import check_duplicate_ids, construct_json_result, get_error_data_result, get_parser_config, get_result, server_error_response, token_required, \
     get_request_json
+from api.utils.file_utils import filename_type
 from rag.app.qa import beAdoc, rmPrefix
 from rag.app.tag import label_question
 from rag.nlp import rag_tokenizer, search
@@ -196,6 +196,11 @@ async def upload_with_meta(dataset_id, tenant_id):
         return get_error_data_result(
             message="No docs in request params!", code=RetCode.ARGUMENT_ERROR
         )
+    if len(docs) > 1000:
+        return get_error_data_result(
+            message=f"Too many documents in request ({len(docs)}). Maximum allowed is 1000.", 
+            code=RetCode.ARGUMENT_ERROR
+        )
     parse = req.get("parse", True)
 
     group_id_field = req.get("group_id_field")
@@ -204,12 +209,17 @@ async def upload_with_meta(dataset_id, tenant_id):
     file_objs = []
     for doc in docs:
         title = doc["title"]
-        file_obj = io.BytesIO(doc["content"].encode("utf-8"))
+        file_obj = BytesIO(doc["content"].encode("utf-8"))
         # `title` may contain dots (e.g., version numbers like "Windows 1.0") which are NOT file extensions.
         # Determine whether it's a supported file type; if not, append `file_extension` so the backend parser can work.
         filename = title
+        normalized_ext = f".{file_extension.lower()}"
         if filename_type(filename) == FileType.OTHER.value:
-            filename = f"{title}.{file_extension}"
+            # Check if title already ends with the extension to avoid duplication
+            if not title.lower().endswith(normalized_ext):
+                filename = f"{title}.{file_extension}"
+            else:
+                filename = title
         file_obj.filename = filename
         metadata = doc.get("metadata", {})
         if not metadata.get("_group_id") and group_id_field and group_id_field in metadata:
@@ -1638,15 +1648,15 @@ async def retrieval_test(tenant_id):
         return get_error_data_result("`documents` should be a list")
     
     if doc_ids:
-      is_valid, _, invalid_doc_ids = KnowledgebaseService.verify_documents_belong_to_kbs(doc_ids, kb_ids)
-      if not is_valid:
-        return get_error_data_result(f"The datasets don't own the documents {invalid_doc_ids}")
+        is_valid, _, invalid_doc_ids = KnowledgebaseService.verify_documents_belong_to_kbs(doc_ids, kb_ids)
+        if not is_valid:
+            return get_error_data_result(f"The datasets don't own the documents {invalid_doc_ids}")
   
     if not doc_ids:
         metadata_condition = req.get("metadata_condition", {}) or {}
         if metadata_condition:
-          metas = DocumentService.get_meta_by_kbs(kb_ids)
-          doc_ids = meta_filter(metas, convert_conditions(metadata_condition), metadata_condition.get("logic", "and"))
+            metas = DocumentService.get_meta_by_kbs(kb_ids)
+            doc_ids = meta_filter(metas, convert_conditions(metadata_condition), metadata_condition.get("logic", "and"))
         # If metadata_condition has conditions but no docs match, return empty result
         if not doc_ids and metadata_condition.get("conditions"):
             return get_result(data={"total": 0, "chunks": [], "doc_aggs": {}})

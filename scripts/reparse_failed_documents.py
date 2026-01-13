@@ -68,6 +68,8 @@ def reparse_failed_documents(rag: RAGFlow, dataset_id: str, batch_size: int = 50
     # Validate batch_size
     if batch_size <= 0:
         raise ValueError(f"batch_size must be greater than 0, got {batch_size}")
+    if batch_size > 10000:
+        raise ValueError(f"batch_size exceeds maximum limit of 10000, got {batch_size}")
     
     # Get dataset
     datasets = rag.list_datasets(id=dataset_id)
