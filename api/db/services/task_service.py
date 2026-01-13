@@ -499,18 +499,19 @@ def queue_tasks_batch(docs_with_storage: list[tuple[dict, str, str]], priority: 
     doc_chunk_nums = {}
     pre_chunk_ids_to_delete = []
     
+    # Define new_task function outside the loop to avoid redefinition on each iteration
+    def new_task(doc_id):
+        return {
+            "id": get_uuid(),
+            "doc_id": doc_id,
+            "progress": 0.0,
+            "from_page": 0,
+            "to_page": 100000000,
+            "begin_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    
     for doc, bucket, name in docs_with_storage:
         doc_id = doc["id"]
-        
-        def new_task():
-            return {
-                "id": get_uuid(),
-                "doc_id": doc_id,
-                "progress": 0.0,
-                "from_page": 0,
-                "to_page": 100000000,
-                "begin_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            }
         
         parse_task_array = []
         
@@ -531,7 +532,7 @@ def queue_tasks_batch(docs_with_storage: list[tuple[dict, str, str]], priority: 
                 s = max(0, s)
                 e = min(e - 1, pages)
                 for p in range(s, e, page_size):
-                    task = new_task()
+                    task = new_task(doc_id)
                     task["from_page"] = p
                     task["to_page"] = min(p + page_size, e)
                     parse_task_array.append(task)
@@ -540,12 +541,12 @@ def queue_tasks_batch(docs_with_storage: list[tuple[dict, str, str]], priority: 
             file_bin = settings.STORAGE_IMPL.get(bucket, name)
             rn = RAGFlowExcelParser.row_number(doc["name"], file_bin)
             for i in range(0, rn, 3000):
-                task = new_task()
+                task = new_task(doc_id)
                 task["from_page"] = i
                 task["to_page"] = min(i + 3000, rn)
                 parse_task_array.append(task)
         else:
-            parse_task_array.append(new_task())
+            parse_task_array.append(new_task(doc_id))
         
         chunking_config = chunking_configs[doc_id]
         for task in parse_task_array:

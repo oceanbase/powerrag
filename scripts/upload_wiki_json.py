@@ -21,7 +21,6 @@ import glob
 import argparse
 import time
 import logging
-from pathlib import Path
 
 from sdk.python.ragflow_sdk.ragflow import RAGFlow
 

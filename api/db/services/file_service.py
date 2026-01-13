@@ -636,6 +636,7 @@ class FileService(CommonService):
                     try:
                         settings.STORAGE_IMPL.rm(kb.id, k)
                     except Exception:
+                        # Ignore cleanup errors to avoid masking the original exception
                         pass
                 err.append(f"storage_put_failed: {e}")
                 return err, []
@@ -654,11 +655,13 @@ class FileService(CommonService):
                     try:
                         settings.STORAGE_IMPL.rm(kb.id, loc)
                     except Exception:
+                        # Ignore cleanup errors to avoid masking the original exception
                         pass
                     if thumb_loc:
                         try:
                             settings.STORAGE_IMPL.rm(kb.id, thumb_loc)
                         except Exception:
+                            # Ignore cleanup errors to avoid masking the original exception
                             pass
                 err.append(f"bulk_insert_failed: {e}")
                 return err, []
