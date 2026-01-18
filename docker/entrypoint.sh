@@ -99,6 +99,7 @@ for arg in "$@"; do
     --powerrag-port=*)
       POWERRAG_PORT="${arg#*=}"
       shift
+      ;;
     --init-superuser)
       INIT_SUPERUSER_ARGS="--init-superuser"
       shift

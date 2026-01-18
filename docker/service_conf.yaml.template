@@ -43,10 +43,6 @@ redis:
   username: '${REDIS_USERNAME:-}'
   password: '${REDIS_PASSWORD:-infini_rag_flow}'
   host: '${REDIS_HOST:-redis}:6379'
-oceanbase:
-  scheme: 'mysql' # set 'mysql' to create connection using mysql config
-  config:
-    db_name: '${OCEANBASE_DOC_DBNAME:-test}'
 gotenberg:
   url: '${GOTENBERG_URL}'
   timeout: 60
