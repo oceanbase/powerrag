@@ -202,8 +202,7 @@ OCEANBASE_DOC_DBNAME=powerrag_doc
 
 如果您遇到类似以下的错误：
 ```
-Error response from daemon: driver failed programming external connectivity on endpoint powerrag-oceanbase-1: 
-Bind for 0.0.0.0:2881 failed: port is already allocated
+Error response from daemon: driver failed programming external connectivity on endpoint powerrag-oceanbase-1: Bind for 0.0.0.0:2881 failed: port is already allocated
 ```
 
 此错误发生在 Docker 保留了先前容器运行的过时端口绑定时，即使使用 `netstat` 或 `lsof` 检查时端口显示为空闲。

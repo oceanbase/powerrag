@@ -202,8 +202,7 @@ If you already have SSL certificates from another provider:
 
 If you encounter an error like:
 ```
-Error response from daemon: driver failed programming external connectivity on endpoint powerrag-oceanbase-1: 
-Bind for 0.0.0.0:2881 failed: port is already allocated
+Error response from daemon: driver failed programming external connectivity on endpoint powerrag-oceanbase-1: Bind for 0.0.0.0:2881 failed: port is already allocated
 ```
 
 This error occurs when Docker has stale port bindings from previous container runs, even if the port appears free when checked with `netstat` or `lsof`.
