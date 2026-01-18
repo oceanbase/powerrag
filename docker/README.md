@@ -7,6 +7,7 @@
 - 🐬 [Docker environment variables](#-docker-environment-variables)
 - 🐋 [Service configuration](#-service-configuration)
 - 📋 [Setup Examples](#-setup-examples)
+- 🔧 [Troubleshooting](#-troubleshooting)
 
 </details>
 
@@ -194,3 +195,65 @@ If you already have SSL certificates from another provider:
 2. Update the volume paths in `docker-compose.yml` to point to your certificate files
 3. Ensure the certificate file contains the full certificate chain
 4. Follow steps 4-5 from the Let's Encrypt guide above
+
+## 🔧 Troubleshooting
+
+### Port Already Allocated Error
+
+If you encounter an error like:
+```
+Error response from daemon: driver failed programming external connectivity on endpoint powerrag-oceanbase-1: 
+Bind for 0.0.0.0:2881 failed: port is already allocated
+```
+
+This error occurs when Docker has stale port bindings from previous container runs, even if the port appears free when checked with `netstat` or `lsof`.
+
+**Solution 1: Clean up Docker resources (Recommended)**
+
+Run the following commands to clean up any orphaned containers and networks:
+
+```bash
+# Stop all containers from this project
+docker compose down
+
+# Remove orphaned containers
+docker compose down --remove-orphans
+
+# If the issue persists, prune Docker networks
+docker network prune -f
+
+# Restart the services
+docker compose up -d
+```
+
+**Solution 2: Change the port**
+
+If you need to use a different port, edit the `.env` file and change the `EXPOSE_OB_PORT` variable:
+
+```dotenv
+EXPOSE_OB_PORT=2882  # Change from default 2881 to another port
+```
+
+Then restart the services:
+
+```bash
+docker compose down
+docker compose up -d
+```
+
+**Solution 3: Restart Docker daemon**
+
+If the above solutions don't work, restart the Docker daemon:
+
+```bash
+# On Linux with systemd
+sudo systemctl restart docker
+
+# On macOS/Windows, restart Docker Desktop from the application
+```
+
+Then try starting the services again:
+
+```bash
+docker compose up -d
+```
