@@ -2,15 +2,35 @@ name: pr
 
 on:
   pull_request:
-    paths-ignore:
-      - "**/*.md"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run_build: ${{ steps.filter.outputs.run_build }}
+    steps:
+      - id: filter
+        name: Detect whether non-Markdown files changed
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            run_build:
+              - '**'
+              - '!**/*.md'
+              - '!**/*.mdx'
+      - name: Gate summary
+        run: echo "run_build=${{ steps.filter.outputs.run_build }}"
+
   build:
+    needs: gate
+    if: needs.gate.outputs.run_build == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
