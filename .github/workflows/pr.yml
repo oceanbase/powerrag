@@ -22,7 +22,6 @@ jobs:
         with:
           filters: |
             run_build:
-              - '**'
               - '!**/*.md'
               - '!**/*.mdx'
       - name: Gate summary
