@@ -1,6 +1,6 @@
 # RAGFlow 脚本使用指南
 
-本目录包含 RAGFlow 的运维部署脚本和工具脚本，用于管理服务部署和数据处理任务。
+本目录包含 RAGFlow 的运维部署脚本，用于管理服务部署。
 
 ## 脚本说明
 
@@ -19,17 +19,6 @@
 - `stop-ragflow-server` - 仅停止 Ragflow Server
 - `start-web` - 启动 Web 前端（正式环境：build + 静态服务）
 - `stop-web` - 停止 Web 前端
-
-### 2. `tools.sh` - 工具脚本
-
-用于执行数据上传和处理相关的工具任务。
-
-**支持的命令：**
-- `upload-wiki` - 上传 Wiki JSON 数据（后台运行，支持断点续传）
-- `stop-upload-wiki` - 停止 Wiki JSON 上传任务
-- `reparse-failed` - 重新解析指定数据集中失败的文档
-- `stop-reparse-failed` - 停止重新解析失败文档任务
-- `status` - 查看工具任务状态
 
 ## 快速开始
 
@@ -68,29 +57,6 @@ cd scripts
 ./deploy.sh start
 ```
 
-### 工具脚本
-
-```bash
-# 上传 Wiki JSON 数据
-./scripts/tools.sh upload-wiki
-
-# 使用自定义参数上传
-API_KEY=xxx HOST=xxx WIKI_DATA_DIR=xxx BATCH_SIZE=1000 ./scripts/tools.sh upload-wiki
-WIKI_ENABLE_RESUME=false ./scripts/tools.sh upload-wiki
-
-# 停止上传任务
-./scripts/tools.sh stop-upload-wiki
-
-# 重新解析失败的文档（需要设置数据集 ID）
-API_KEY=xxx HOST=xxx DATASET_ID=xxx BATCH_SIZE=1000 ./scripts/tools.sh reparse-failed
-
-# 停止重新解析任务
-./scripts/tools.sh stop-reparse-failed
-
-# 查看工具任务状态
-./scripts/tools.sh status
-```
-
 ## 环境变量配置
 
 ### 运维部署相关
@@ -98,23 +64,6 @@ API_KEY=xxx HOST=xxx DATASET_ID=xxx BATCH_SIZE=1000 ./scripts/tools.sh reparse-f
 - `WORKER_COUNT` - Worker 数量（默认: 2）
 - `SERVER_PORT_FOR_WEB` - Ragflow Server 端口（默认: 9380）
 - `WEB_PORT` - Web 前端端口（默认: 9222）
-
-### Wiki 上传相关
-
-- `API_KEY` - API Key
-- `HOST` - 服务器地址（默认: http://127.0.0.1:9380）
-- `WIKI_DATA_DIR` - 数据目录
-- `DATASET_ID` - 数据集 ID（可选）
-- `BATCH_SIZE` - 批量大小（默认: 1000）
-- `WIKI_SNAPSHOT_FILE` - 快照文件路径（默认: `${LOG_DIR}/upload_snapshot.json`）
-- `WIKI_ENABLE_RESUME` - 是否启用断点续传（默认: true）
-
-### 重新解析失败文档相关
-
-- `API_KEY` - API Key
-- `HOST` - 服务器地址（默认: http://127.0.0.1:9380）
-- `DATASET_ID` - 数据集 ID（必需）
-- `BATCH_SIZE` - 批量大小（默认: 50）
 
 ## 日志文件
 
@@ -124,11 +73,6 @@ API_KEY=xxx HOST=xxx DATASET_ID=xxx BATCH_SIZE=1000 ./scripts/tools.sh reparse-f
 - Worker N: `logs/worker_N.log`
 - Web Frontend: `logs/web_frontend.log`
 
-### 工具任务日志
-
-- Wiki JSON 上传: `logs/upload_wiki_json.log`
-- 重新解析失败文档: `logs/reparse_failed_docs.log`
-
 ## 查看日志
 
 ```bash
@@ -137,12 +81,6 @@ tail -f logs/ragflow_server.log
 
 # 实时查看 Worker 0 日志
 tail -f logs/worker_0.log
-
-# 实时查看 Wiki 上传日志
-tail -f logs/upload_wiki_json.log
-
-# 实时查看重新解析日志
-tail -f logs/reparse_failed_docs.log
 ```
 
 ## 停止服务
@@ -167,13 +105,9 @@ kill <PID>
 - `pids/ragflow_server.pid` - Ragflow Server 进程 ID
 - `pids/worker_N.pid` - Worker N 进程 ID
 - `pids/web_frontend.pid` - Web 前端进程 ID
-- `pids/upload_wiki_json.pid` - Wiki 上传任务进程 ID
-- `pids/reparse_failed_docs.pid` - 重新解析任务进程 ID
 
 ## 注意事项
 
 1. 所有脚本都需要从项目根目录运行，或确保 `WORKSPACE_FOLDER` 环境变量正确设置
 2. 使用 `force-stop` 或 `force-restart` 会强制终止所有相关进程，请谨慎使用
-3. Wiki 上传任务支持断点续传，默认启用。快照文件保存在 `${LOG_DIR}/upload_snapshot.json`
-4. 重新解析失败文档任务需要设置 `DATASET_ID` 环境变量
-5. 所有日志文件都保存在 `logs/` 目录下
+3. 所有日志文件都保存在 `logs/` 目录下
