@@ -12,20 +12,42 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
     outputs:
-      run_build: ${{ steps.filter.outputs.run_build }}
+      run_build: ${{ steps.detect.outputs.run_build }}
     steps:
-      - id: filter
-        name: Detect whether non-Markdown files changed
-        uses: dorny/paths-filter@v3
+      - name: Check out code
+        uses: actions/checkout@v4
         with:
-          filters: |
-            run_build:
-              - '!**/*.md'
-              - '!**/*.mdx'
-      - name: Gate summary
-        run: echo "run_build=${{ steps.filter.outputs.run_build }}"
+          fetch-depth: 0
+
+      - id: detect
+        name: Detect whether non-Markdown files changed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          echo "Base: $base"
+          echo "Head: $head"
+
+          files="$(git diff --name-only "$base" "$head" || true)"
+          echo "Changed files:"
+          printf '%s\n' "$files"
+
+          run_build=false
+          while IFS= read -r f; do
+            [[ -z "${f:-}" ]] && continue
+            ext="${f##*.}"
+            ext_lc="$(printf '%s' "$ext" | tr '[:upper:]' '[:lower:]')"
+            if [[ "$ext_lc" != "md" && "$ext_lc" != "mdx" ]]; then
+              run_build=true
+              break
+            fi
+          done <<< "$files"
+
+          echo "run_build=$run_build" >> "$GITHUB_OUTPUT"
+          echo "run_build=$run_build"
 
   build:
     needs: gate
