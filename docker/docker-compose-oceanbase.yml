@@ -12,13 +12,13 @@ services:
       - ${SVR_MCP_PORT}:9382 # entry for MCP (host_port:docker_port). The docker_port must match the value you set for `mcp-port` above.
       - ${POWERRAG_SVR_HTTP_PORT:-6000}:6000 # entry for PowerRAG server (host_port:docker_port). The docker_port must match the value you set for `powerrag-port` above.
     volumes:
-      - ./ragflow-logs:/ragflow/logs
-      - ./nginx/ragflow.conf:/etc/nginx/conf.d/ragflow.conf
-      - ./nginx/proxy.conf:/etc/nginx/proxy.conf
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ../history_data_agent:/ragflow/history_data_agent
-      - ./service_conf.yaml.template:/ragflow/conf/service_conf.yaml.template
-      - ./entrypoint.sh:/ragflow/entrypoint.sh
+      - powerrag_logs:/ragflow/logs
+      - ./nginx/ragflow.conf:/etc/nginx/conf.d/ragflow.conf:ro
+      - ./nginx/proxy.conf:/etc/nginx/proxy.conf:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - powerrag_history_data:/ragflow/history_data_agent
+      - ./service_conf.yaml.template:/ragflow/conf/service_conf.yaml.template:ro
+      - ./entrypoint.sh:/ragflow/entrypoint.sh:ro
     env_file: .env
     environment:
       - TZ=${TIMEZONE}
@@ -49,9 +49,9 @@ services:
       - OB_CLUSTER_NAME=${OB_CLUSTER_NAME:-powerrag}
       - OB_SERVER_IP=127.0.0.1
     volumes:
-      - ./oceanbase/init.d:/root/boot/init.d
-      - ./oceanbase/data:/root/ob
-      - ./oceanbase/conf:/root/.obd/cluster
+      - ./oceanbase/init.d:/root/boot/init.d:ro
+      - oceanbase_data:/root/ob
+      - oceanbase_conf:/root/.obd/cluster
     networks:
       - powerrag
     restart: on-failure
@@ -88,6 +88,16 @@ services:
       start_period: 40s
     networks:
       - powerrag
+
+volumes:
+  powerrag_logs:
+    driver: local
+  powerrag_history_data:
+    driver: local
+  oceanbase_data:
+    driver: local
+  oceanbase_conf:
+    driver: local
 
 networks:
   powerrag:
