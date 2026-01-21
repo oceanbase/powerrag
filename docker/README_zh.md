@@ -234,6 +234,24 @@ Linux 是主要的开发平台，无需额外配置即可工作。
 
 PowerRAG 使用 Docker 命名卷存储持久化数据（日志、数据库文件、历史数据）。这些卷在容器重启和更新之间保持持久。
 
+#### 多实例部署
+
+Docker Compose 自动为卷名添加项目名称前缀（来自 `.env` 中的 `COMPOSE_PROJECT_NAME`，默认为 `powerrag`）。这允许在同一台机器上运行多个部署而不会发生冲突：
+
+**卷命名示例：**
+- 使用 `COMPOSE_PROJECT_NAME=powerrag`：卷名变为 `powerrag_powerrag_logs`、`powerrag_oceanbase_data` 等
+- 使用 `COMPOSE_PROJECT_NAME=powerrag-dev`：卷名变为 `powerrag-dev_powerrag_logs`、`powerrag-dev_oceanbase_data` 等
+
+**运行多个部署的方法：**
+1. 为每个部署创建单独的目录
+2. 在每个目录的 `.env` 文件中设置唯一的 `COMPOSE_PROJECT_NAME`：
+   ```dotenv
+   COMPOSE_PROJECT_NAME=powerrag-production
+   # 或
+   COMPOSE_PROJECT_NAME=powerrag-dev
+   ```
+3. 每个部署将拥有自己独立的卷集
+
 #### 列出卷
 
 查看所有 PowerRAG 相关的卷：

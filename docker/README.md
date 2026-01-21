@@ -234,6 +234,24 @@ Linux is the primary development platform and should work without additional con
 
 PowerRAG uses Docker named volumes to store persistent data (logs, database files, history data). These volumes persist across container restarts and updates.
 
+#### Multiple Deployments
+
+Docker Compose automatically prefixes volume names with the project name (from `COMPOSE_PROJECT_NAME` in `.env`, default is `powerrag`). This allows multiple deployments on the same machine without conflicts:
+
+**Example volume naming:**
+- With `COMPOSE_PROJECT_NAME=powerrag`: volumes become `powerrag_powerrag_logs`, `powerrag_oceanbase_data`, etc.
+- With `COMPOSE_PROJECT_NAME=powerrag-dev`: volumes become `powerrag-dev_powerrag_logs`, `powerrag-dev_oceanbase_data`, etc.
+
+**To run multiple deployments:**
+1. Create separate directories for each deployment
+2. In each directory's `.env` file, set a unique `COMPOSE_PROJECT_NAME`:
+   ```dotenv
+   COMPOSE_PROJECT_NAME=powerrag-production
+   # or
+   COMPOSE_PROJECT_NAME=powerrag-dev
+   ```
+3. Each deployment will have its own isolated set of volumes
+
 #### Listing Volumes
 
 To see all PowerRAG-related volumes:
