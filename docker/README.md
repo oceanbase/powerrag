@@ -247,7 +247,7 @@ Before cleaning up or upgrading, you may want to back up your data:
 
 ```bash
 # Back up all PowerRAG volumes
-docker run --rm -v powerrag_logs:/data -v $(pwd)/backup:/backup alpine tar czf /backup/powerrag_logs.tar.gz -C /data .
+docker run --rm -v powerrag_powerrag_logs:/data -v $(pwd)/backup:/backup alpine tar czf /backup/powerrag_logs.tar.gz -C /data .
 docker run --rm -v powerrag_oceanbase_data:/data -v $(pwd)/backup:/backup alpine tar czf /backup/oceanbase_data.tar.gz -C /data .
 docker run --rm -v powerrag_powerrag_history_data:/data -v $(pwd)/backup:/backup alpine tar czf /backup/history_data.tar.gz -C /data .
 ```
