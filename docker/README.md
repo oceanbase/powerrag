@@ -276,15 +276,42 @@ docker volume rm powerrag_powerrag_logs powerrag_oceanbase_data powerrag_powerra
 docker compose up -d
 ```
 
-#### Inspecting Volume Data
+#### Viewing Logs and Data
 
-To inspect the contents of a volume:
+**To view logs from running containers:**
+
 ```bash
-# View logs
+# View PowerRAG service logs
+docker compose logs -f powerrag
+
+# View OceanBase database logs
+docker compose logs -f oceanbase
+
+# View all service logs
+docker compose logs -f
+```
+
+**To access logs and data in volumes:**
+
+```bash
+# View log files in the volume
 docker run --rm -v powerrag_powerrag_logs:/data alpine ls -la /data
+
+# Read specific log file
+docker run --rm -v powerrag_powerrag_logs:/data alpine cat /data/ragflow.log
 
 # Access volume data interactively
 docker run --rm -it -v powerrag_oceanbase_data:/data alpine sh
+```
+
+**To copy files from volumes to your host:**
+
+```bash
+# Copy logs from volume to current directory
+docker run --rm -v powerrag_powerrag_logs:/data -v $(pwd):/backup alpine cp -r /data /backup/logs
+
+# Copy database data
+docker run --rm -v powerrag_oceanbase_data:/data -v $(pwd):/backup alpine cp -r /data /backup/db_data
 ```
 
 ### Port Already Allocated Error

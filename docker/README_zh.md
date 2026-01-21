@@ -22,6 +22,8 @@
 - **docker-compose-self-hosted-ob.yml**  
   设置 PowerRAG 及其依赖项的环境，数据库使用自托管 OceanBase 或 SeekDB。
 
+所有配置都使用 **Docker 命名卷** 来持久化数据，确保跨 Linux、Windows 和 macOS 平台的兼容性。配置文件以只读方式从仓库挂载。
+
 程序默认使用 docker-compose.yml，您可以通过 `docker compose -f` 指定配置文件，例如使用自托管数据库启动服务时，可以使用如下命令：
 
 ```shell
@@ -197,6 +199,120 @@ OCEANBASE_DOC_DBNAME=powerrag_doc
 4. 按照上述 Let's Encrypt 指南中的步骤 4-5 操作
 
 ## 🔧 故障排除
+
+### 平台特定注意事项
+
+PowerRAG 的 Docker 部署已设计为可在 Linux、Windows 和 macOS 上无缝工作。Docker Compose 文件使用 **命名 Docker 卷** 进行数据持久化，确保跨平台兼容性。
+
+#### Windows
+
+在 Windows 上运行时，请确保：
+- 安装并运行 **Docker Desktop**，并启用 WSL 2 后端（推荐）
+- 配置文件（在 `nginx/`、`oceanbase/init.d/` 等目录中）使用 **LF 行尾**而不是 CRLF：
+  ```bash
+  git config core.autocrlf false
+  git rm --cached -r .
+  git reset --hard
+  ```
+- 卷挂载中的文件路径由 Docker Desktop 自动处理
+
+#### macOS
+
+在 macOS 上运行时：
+- 安装并运行 **Docker Desktop**
+- 在您的 `.env` 文件中设置 `MACOS` 环境变量：
+  ```dotenv
+  MACOS=1
+  ```
+- 对于 Apple Silicon（M1/M2/M3），Docker 将自动处理平台仿真
+
+#### Linux
+
+Linux 是主要的开发平台，无需额外配置即可工作。
+
+### 卷管理
+
+PowerRAG 使用 Docker 命名卷存储持久化数据（日志、数据库文件、历史数据）。这些卷在容器重启和更新之间保持持久。
+
+#### 列出卷
+
+查看所有 PowerRAG 相关的卷：
+```bash
+docker volume ls | grep powerrag
+```
+
+#### 备份卷
+
+在清理或升级之前，您可能需要备份数据：
+
+```bash
+# 备份所有 PowerRAG 卷
+docker run --rm -v powerrag_powerrag_logs:/data -v $(pwd)/backup:/backup alpine tar czf /backup/powerrag_logs.tar.gz -C /data .
+docker run --rm -v powerrag_oceanbase_data:/data -v $(pwd)/backup:/backup alpine tar czf /backup/oceanbase_data.tar.gz -C /data .
+docker run --rm -v powerrag_powerrag_history_data:/data -v $(pwd)/backup:/backup alpine tar czf /backup/history_data.tar.gz -C /data .
+```
+
+#### 清理卷
+
+> [!WARNING]
+> 删除卷将永久删除所有数据，包括日志、数据库内容和历史记录。请确保先备份重要数据。
+
+**删除所有 PowerRAG 卷和数据：**
+
+```bash
+# 停止并删除所有容器
+docker compose down
+
+# 删除所有 PowerRAG 卷
+docker compose down -v
+
+# 或手动删除特定卷
+docker volume rm powerrag_powerrag_logs powerrag_oceanbase_data powerrag_powerrag_history_data
+```
+
+**清理后重新启动：**
+
+```bash
+docker compose up -d
+```
+
+#### 查看日志和数据
+
+**查看运行中容器的日志：**
+
+```bash
+# 查看 PowerRAG 服务日志
+docker compose logs -f powerrag
+
+# 查看 OceanBase 数据库日志
+docker compose logs -f oceanbase
+
+# 查看所有服务日志
+docker compose logs -f
+```
+
+**访问卷中的日志和数据：**
+
+```bash
+# 查看卷中的日志文件
+docker run --rm -v powerrag_powerrag_logs:/data alpine ls -la /data
+
+# 读取特定日志文件
+docker run --rm -v powerrag_powerrag_logs:/data alpine cat /data/ragflow.log
+
+# 以交互方式访问卷数据
+docker run --rm -it -v powerrag_oceanbase_data:/data alpine sh
+```
+
+**将文件从卷复制到主机：**
+
+```bash
+# 将日志从卷复制到当前目录
+docker run --rm -v powerrag_powerrag_logs:/data -v $(pwd):/backup alpine cp -r /data /backup/logs
+
+# 复制数据库数据
+docker run --rm -v powerrag_oceanbase_data:/data -v $(pwd):/backup alpine cp -r /data /backup/db_data
+```
 
 ### 端口已被占用错误
 
