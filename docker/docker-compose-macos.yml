@@ -33,8 +33,8 @@ services:
   #       condition: service_healthy
   #   image: ${RAGFLOW_IMAGE}
   #   volumes:
-  #     - powerrag_logs:/ragflow/logs
-  #     - ./nginx/ragflow.conf:/etc/nginx/conf.d/ragflow.conf:ro
+  #     - ./ragflow-logs:/ragflow/logs
+  #     - ./nginx/ragflow.conf:/etc/nginx/conf.d/ragflow.conf
   #   env_file: .env
   #   entrypoint: "/ragflow/entrypoint_task_executor.sh 1 3"
   #   networks:

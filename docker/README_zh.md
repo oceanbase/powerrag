@@ -208,7 +208,7 @@ PowerRAG 的 Docker 部署已设计为可在 Linux、Windows 和 macOS 上无缝
 
 在 Windows 上运行时，请确保：
 - 安装并运行 **Docker Desktop**，并启用 WSL 2 后端（推荐）
-- 配置文件（在 `nginx/`、`oceanbase/init.d/` 等目录中）使用 **LF 行尾**而不是 CRLF：
+- 如果遇到配置文件相关的问题，可以检查配置文件（在 `nginx/`、`oceanbase/init.d/` 等目录中）是否使用 **LF 行尾**而不是 CRLF：
   ```bash
   git config core.autocrlf false
   git rm --cached -r .

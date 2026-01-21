@@ -208,7 +208,7 @@ PowerRAG's Docker deployment has been designed to work across Linux, Windows, an
 
 When running on Windows, ensure:
 - **Docker Desktop** is installed and running with WSL 2 backend enabled (recommended)
-- Configuration files (in `nginx/`, `oceanbase/init.d/`, etc.) use **LF line endings** instead of CRLF:
+- If you encounter issues with configuration files, check that configuration files (in `nginx/`, `oceanbase/init.d/`, etc.) use **LF line endings** instead of CRLF:
   ```bash
   git config core.autocrlf false
   git rm --cached -r .
