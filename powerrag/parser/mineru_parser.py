@@ -26,7 +26,7 @@ from io import BytesIO
 import pdfplumber
 from typing import Union, Dict, TypedDict, Tuple
 from api.utils.configs import get_base_config
-from common.settings import STORAGE_IMPL
+from common import settings
 from PIL import Image
 
 LOCK_KEY_pdfplumber = "global_shared_lock_pdfplumber"
@@ -246,7 +246,7 @@ class MinerUPdfParser:
                 img_bytes = base64.b64decode(img_base64)
 
                 # Store image in OceanBase
-                STORAGE_IMPL.put(output_dir, img_name, img_bytes)
+                settings.STORAGE_IMPL.put(output_dir, img_name, img_bytes)
 
                 # Generate URL for the image using PowerRAG image access endpoint
                 # Get PowerRAG server configuration

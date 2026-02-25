@@ -30,7 +30,7 @@ from pathlib import Path
 from api.db.services.document_service import DocumentService
 from api.db.services.file2document_service import File2DocumentService
 from common.constants import ParserType
-from common.settings import STORAGE_IMPL
+from common import settings
 
 # Import split service for text chunking
 from powerrag.server.services.split_service import PowerRAGSplitService
@@ -119,7 +119,7 @@ class PowerRAGParseService:
             parser_config = doc.get["parser_config"]
             # Get document binary data from storage
             bucket, name = File2DocumentService.get_storage_address(doc_id=doc_id)
-            binary = STORAGE_IMPL.get(bucket, name)
+            binary = settings.STORAGE_IMPL.get(bucket, name)
             
             if not binary:
                 raise ValueError(f"Document binary data not found for {doc_id}")
@@ -662,7 +662,7 @@ class PowerRAGParseService:
             if not bucket or not name:
                 raise ValueError(f"Invalid storage address for document {doc_id}: bucket={bucket}, name={name}")
             
-            storage = STORAGE_IMPL
+            storage = settings.STORAGE_IMPL
             
             if not storage:
                 raise ValueError("Storage implementation not available")

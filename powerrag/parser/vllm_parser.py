@@ -24,7 +24,7 @@ from io import BytesIO
 import pdfplumber
 from typing import Union, Dict, TypedDict, Tuple, List, Optional
 from api.utils.configs import get_base_config
-from common.settings import STORAGE_IMPL
+from common import settings
 from openai import OpenAI
 from PIL import Image
 import io
@@ -413,7 +413,7 @@ class VllmParser:
                         img_bytes = buffered.getvalue()
                         
                         # Store image in storage (bucket)
-                        STORAGE_IMPL.put(output_dir, img_filename, img_bytes)
+                        settings.STORAGE_IMPL.put(output_dir, img_filename, img_bytes)
                         
                         # Generate URL for the image
                         powerrag_config = get_base_config("powerrag", {}) or {}
@@ -660,7 +660,7 @@ class VllmParser:
                 img_bytes = base64.b64decode(img_base64)
 
                 # Store image in storage
-                STORAGE_IMPL.put(output_dir, img_name, img_bytes)
+                settings.STORAGE_IMPL.put(output_dir, img_name, img_bytes)
 
                 # Generate URL for the image using RAGFlow image access endpoint
                 # Get RAGFlow server configuration

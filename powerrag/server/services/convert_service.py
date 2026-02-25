@@ -28,7 +28,7 @@ from typing import Dict, Any
 
 from api.db.services.document_service import DocumentService
 from api.db.services.file2document_service import File2DocumentService
-from common.settings import STORAGE_IMPL
+from common import settings
 from powerrag.parser import MinerUPdfParser, DotsOcrParser
 
 logger = logging.getLogger(__name__)
@@ -86,7 +86,7 @@ class PowerRAGConvertService:
             
             # Get binary data
             bucket, name = File2DocumentService.get_storage_address(doc_id=doc_id)
-            binary = STORAGE_IMPL.get(bucket, name)
+            binary = settings.STORAGE_IMPL.get(bucket, name)
             
             if not binary:
                 raise ValueError(f"Document binary not found for {doc_id}")
