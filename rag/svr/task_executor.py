@@ -61,10 +61,13 @@ from common.versions import get_ragflow_version
 from api.db.db_models import close_connection
 from rag.app import laws, paper, presentation, manual, qa, table, book, resume, picture, naive, one, audio, \
     email, tag
+from powerrag.app import title as powerrag_title
+from powerrag.app import regex as powerrag_regex
+from powerrag.app import smart as powerrag_smart
 from rag.nlp import search, rag_tokenizer, add_positions
 from rag.raptor import RecursiveAbstractiveProcessing4TreeOrganizedRetrieval as Raptor
 from common.token_utils import num_tokens_from_string, truncate
-from rag.utils.redis_conn import REDIS_CONN, RedisDistributedLock
+from rag.utils.redis_conn import REDIS_CONN, distributed_lock
 from graphrag.utils import chat_limiter
 from common.signal_utils import start_tracemalloc_and_snapshot, stop_tracemalloc
 from common.exceptions import TaskCanceledException
@@ -89,6 +92,9 @@ FACTORY = {
     ParserType.AUDIO.value: audio,
     ParserType.EMAIL.value: email,
     ParserType.KG.value: naive,
+    ParserType.TITLE.value: powerrag_title,
+    ParserType.REGEX.value: powerrag_regex,
+    ParserType.SMART.value: powerrag_smart,
     ParserType.TAG.value: tag
 }
 
@@ -1190,7 +1196,7 @@ async def get_server_ip() -> str:
 async def report_status():
     global CONSUMER_NAME, BOOT_AT, PENDING_TASKS, LAG_TASKS, DONE_TASKS, FAILED_TASKS
     REDIS_CONN.sadd("TASKEXE", CONSUMER_NAME)
-    redis_lock = RedisDistributedLock("clean_task_executor", lock_value=CONSUMER_NAME, timeout=60)
+    redis_lock = distributed_lock("clean_task_executor", lock_value=CONSUMER_NAME, timeout=60)
     while True:
         try:
             now = datetime.now()
