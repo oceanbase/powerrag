@@ -257,8 +257,8 @@ class RetryingPooledMySQLDatabase(PooledMySQLDatabase):
         try:
             if not self.is_closed():
                 self.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug(f"manual_close failed: {e}")
 
     def execute_sql(self, sql, params=None, commit=True):
         for attempt in range(self.max_retries + 1):

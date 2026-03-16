@@ -640,7 +640,7 @@ class OceanBaseRedisDb(RedisAble):
                 cursor = self.db.execute_sql(
                     "select count(1) from message_subscribe where stream = %s and group_name = %s", (queue, group_name))
                 ret = cursor.fetchone()
-                if ret == 0:
+                if ret is None or ret[0] == 0:
                     return None
                 else:
                     cursor = self.db.execute_sql(
