@@ -24,19 +24,9 @@ cleanup_container() {
 trap "cleanup_container" EXIT
 
 mkdir -p huggingface.co/InfiniFlow rag/res/deepdoc
-docker cp ragflow_deps_temp:/huggingface.co/InfiniFlow/huqie/huqie.txt.trie rag/res/
 docker cp ragflow_deps_temp:/huggingface.co/InfiniFlow/text_concat_xgb_v1.0 huggingface.co/InfiniFlow/text_concat_xgb_v1.0
 docker cp ragflow_deps_temp:/huggingface.co/InfiniFlow/deepdoc huggingface.co/InfiniFlow/deepdoc
 ({ tar --exclude='.*' -cf - huggingface.co/InfiniFlow/text_concat_xgb_v1.0 huggingface.co/InfiniFlow/deepdoc 2>&3 | tar -xf - --strip-components=3 -C rag/res/deepdoc; } 3>&2)
 
-if [ "${LIGHTEN:-0}" != "1" ]; then
-    mkdir -p "$HOME/.ragflow"
-    docker cp ragflow_deps_temp:/huggingface.co/BAAI "huggingface.co/"
-    docker cp ragflow_deps_temp:/huggingface.co/maidalun1020 "huggingface.co/"
-    ({ tar -cf - huggingface.co/BAAI/bge-large-zh-v1.5 huggingface.co/maidalun1020/bce-embedding-base_v1 2>&3 | tar -xf - --strip-components=2 -C "$HOME/.ragflow"; } 3>&2)
-fi
-
 docker cp ragflow_deps_temp:/nltk_data .
-docker cp ragflow_deps_temp:/tika-server-standard-3.0.0.jar .
-docker cp ragflow_deps_temp:/tika-server-standard-3.0.0.jar.md5 .
 docker cp ragflow_deps_temp:/cl100k_base.tiktoken ./9b5ad71b2ce5302211f9c61530b329a4922fc6a4
