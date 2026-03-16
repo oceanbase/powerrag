@@ -245,6 +245,18 @@ class RetryingPooledMySQLDatabase(PooledMySQLDatabase):
         self.retry_delay = kwargs.pop("retry_delay", 1)
         super().__init__(*args, **kwargs)
 
+    def manual_close(self):
+        """
+        Close the current thread's connection and return it to the pool.
+
+        In peewee's PooledMySQLDatabase, connections are not automatically returned
+        to the pool after execute_sql(). They only get returned when close() is called.
+        This method should be called after database operations to prevent connection
+        pool exhaustion, especially in scenarios with many concurrent operations.
+        """
+        if not self.is_closed():
+            self.close()
+
     def execute_sql(self, sql, params=None, commit=True):
         for attempt in range(self.max_retries + 1):
             try:
