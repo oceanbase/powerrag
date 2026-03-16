@@ -5,6 +5,7 @@ import time
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
+from functools import wraps
 
 import trio
 from peewee import IntegrityError, ProgrammingError
@@ -25,6 +26,25 @@ def get_db():
     logging.debug(f"use ob mysql to mock redis, db_name:{db_name}")
     DATABASE = RetryingPooledMySQLDatabase(db_name, **database_config)
     return DATABASE
+
+
+def release_connection(func):
+    """
+    Decorator to ensure database connection is returned to pool after method execution.
+
+    Peewee's PooledMySQLDatabase does not automatically return connections to the pool
+    after execute_sql(). This decorator ensures connections are properly released
+    to prevent connection pool exhaustion under high concurrency.
+    """
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return func(self, *args, **kwargs)
+        finally:
+            if isinstance(self.db, RetryingPooledMySQLDatabase):
+                self.db.manual_close()
+    return wrapper
+
 
 
 # 由于这里数据库 message 返回值是str,而 redis_conn stream 接口返回的是 dict,所以 RedisMsg 接口初始化略有不同，因此单独声明一个 RedisMsg
@@ -76,6 +96,7 @@ class OceanBaseRedisDb(RedisAble):
     def register_scripts(self) -> None:
         raise NotImplementedError("Not implemented")
 
+    @release_connection
     def health(self):
         try:
             self.db.execute_sql("select 1 from dual")
@@ -86,13 +107,12 @@ class OceanBaseRedisDb(RedisAble):
     def is_alive(self):
         return self.health()
 
+    @release_connection
     def exist(self, k):
         if not self.db:
             return
         try:
-
             cursor = self.db.execute_sql('select count(1) from cache where cache_key = %s and expire_time > now()', (k))
-
             ret = cursor.fetchone()
             return ret[0] == 1
         except Exception as e:
@@ -101,6 +121,7 @@ class OceanBaseRedisDb(RedisAble):
             else:
                 logging.warning("RedisDB.exist " + str(k) + " got exception: " + str(e))
 
+    @release_connection
     def delete_if_equal(self, key: str, expected_value: str) -> bool:
         try:
             cursor = self.db.execute_sql('delete from cache where cache_key = %s and cache_value = %s and expire_time '
@@ -114,6 +135,7 @@ class OceanBaseRedisDb(RedisAble):
                     "RedisDB.delete_if_equal " + str(key) + ":" + str(expected_value) + " got exception: " + str(e))
             return False
 
+    @release_connection
     def delete(self, key) -> bool:
         try:
             self.db.execute_sql('delete from cache where cache_key = %s ', (key))
@@ -125,7 +147,7 @@ class OceanBaseRedisDb(RedisAble):
                 logging.warning("RedisDB.delete " + str(key) + " got exception: " + str(e))
         return False
 
-    def deleteIfExpired(self, key) -> bool:
+    def _deleteIfExpired(self, key) -> bool:
         try:
             self.db.execute_sql('delete from cache where cache_key = %s and expire_time < now() ', key)
             return True
@@ -136,6 +158,11 @@ class OceanBaseRedisDb(RedisAble):
                 logging.warning("RedisDB.delete " + str(key) + " got exception: " + str(e))
         return False
 
+    @release_connection
+    def deleteIfExpired(self, key) -> bool:
+        return self._deleteIfExpired(key)
+
+    @release_connection
     def get(self, k):
         if not self.db:
             return None
@@ -150,9 +177,9 @@ class OceanBaseRedisDb(RedisAble):
             else:
                 logging.warning("RedisDB.get " + str(k) + " got exception: " + str(e))
 
-    def set_obj(self, k, obj, exp=3600):
+    def _set_obj(self, k, obj, exp=3600):
         try:
-            self.set_object(k, obj, exp)
+            self._set_object(k, obj, exp)
             return True
         except Exception as e:
             if is_table_missing_exception(e):
@@ -161,12 +188,21 @@ class OceanBaseRedisDb(RedisAble):
                 logging.warning("RedisDB.set_obj " + str(k) + " got exception: " + str(e))
         return False
 
-    def set_object(self, k, obj, exp=3600):
+    @release_connection
+    def set_obj(self, k, obj, exp=3600):
+        return self._set_obj(k, obj, exp)
+
+    def _set_object(self, k, obj, exp=3600):
         expire_time = datetime.now() + timedelta(seconds=exp)
         self.db.execute_sql('replace into cache (cache_key, cache_value, expire_time) values (%s, %s, %s)',
                             (k, json.dumps(obj, ensure_ascii=False), expire_time))
         return True
 
+    @release_connection
+    def set_object(self, k, obj, exp=3600):
+        return self._set_object(k, obj, exp)
+
+    @release_connection
     def set(self, k, v, exp=3600):
         try:
             expire_time = datetime.now() + timedelta(seconds=exp)
@@ -180,10 +216,11 @@ class OceanBaseRedisDb(RedisAble):
                 logging.warning("RedisDB.set " + str(k) + " got exception: " + str(e))
         return False
 
+    @release_connection
     def setNx(self, k, v, exp=3600):
         try:
             # 删除过期的kv
-            self.deleteIfExpired(k)
+            self._deleteIfExpired(k)
             expire_time = datetime.now() + timedelta(seconds=exp)
             self.db.execute_sql('insert into cache (cache_key, cache_value, expire_time) values (%s, %s, %s)',
                                 (k, v, expire_time))
@@ -202,6 +239,7 @@ class OceanBaseRedisDb(RedisAble):
         return self.setNx(key, value, exp)
 
     # zset
+    @release_connection
     def zadd(self, key: str, member: str, score: float):
         try:
             with self.db.atomic():
@@ -210,7 +248,7 @@ class OceanBaseRedisDb(RedisAble):
                 ret = cursor.fetchone()
                 if ret is None:
                     mp = {member: score}
-                    return self.set_object(key, mp)
+                    return self._set_object(key, mp)
                 else:
                     id = ret[0]
                     cursor = self.db.execute_sql(
@@ -228,6 +266,7 @@ class OceanBaseRedisDb(RedisAble):
                 logging.warning("RedisDB.zadd " + str(key) + " got exception: " + str(e))
             return False
 
+    @release_connection
     def zcount(self, key: str, min, max: float):
         try:
             cursor = self.db.execute_sql(
@@ -245,6 +284,7 @@ class OceanBaseRedisDb(RedisAble):
                 logging.warning("RedisDB.zcount " + str(key) + " got exception: " + str(e))
             return 0
 
+    @release_connection
     def zpopmin(self, key: str, count: int):
         try:
             with self.db.atomic() as trx:
@@ -264,7 +304,7 @@ class OceanBaseRedisDb(RedisAble):
                             break
                     for k, v in ret.items():
                         del mp[k]
-                    self.set_object(key, mp)
+                    self._set_object(key, mp)
                     return ret
         except Exception as e:
             if is_table_missing_exception(e):
@@ -273,6 +313,7 @@ class OceanBaseRedisDb(RedisAble):
                 logging.warning("RedisDB.zpopmin " + str(key) + " got exception: " + str(e))
             return None
 
+    @release_connection
     def sadd(self, key: str, member: str):
         try:
             with self.db.atomic():
@@ -281,11 +322,11 @@ class OceanBaseRedisDb(RedisAble):
                 ret = cursor.fetchone()
                 if ret is None:
                     st = {member}
-                    return self.set_object(key, list(st))
+                    return self._set_object(key, list(st))
                 else:
                     st = set(json.loads(ret[0]))
                     st.add(member)
-                    return self.set_obj(key, list(st))
+                    return self._set_obj(key, list(st))
         except Exception as e:
             if is_table_missing_exception(e):
                 pass
@@ -293,6 +334,7 @@ class OceanBaseRedisDb(RedisAble):
                 logging.warning("RedisDB.sadd " + str(key) + " got exception: " + str(e))
             return False
 
+    @release_connection
     def srem(self, key: str, member: str):
         try:
             with self.db.atomic():
@@ -304,7 +346,7 @@ class OceanBaseRedisDb(RedisAble):
                 else:
                     st = set(json.loads(ret[0]))
                     st.discard(member)
-                    return self.set_object(key, list(st))
+                    return self._set_object(key, list(st))
         except Exception as e:
             if is_table_missing_exception(e):
                 pass
@@ -312,6 +354,7 @@ class OceanBaseRedisDb(RedisAble):
                 logging.warning("RedisDB.srem " + str(key) + " got exception: " + str(e))
             return False
 
+    @release_connection
     def smembers(self, key: str):
         try:
             cursor = self.db.execute_sql("select cache_value from cache where cache_key = %s and expire_time > "
@@ -328,6 +371,7 @@ class OceanBaseRedisDb(RedisAble):
                 logging.warning("RedisDB.smembers " + str(key) + " got exception: " + str(e))
             return []
 
+    @release_connection
     def zrangebyscore(self, key: str, min: float, max: float):
         try:
             cursor = self.db.execute_sql("select cache_value from cache where cache_key = %s and expire_time > now() ",
@@ -351,6 +395,7 @@ class OceanBaseRedisDb(RedisAble):
             return None
 
     # 以下是redis stream
+    @release_connection
     def queue_product(self, queue, message) -> bool:
         """
             向消息队列推送消息，如果消息队列不存在，则创建消息队列
@@ -370,6 +415,7 @@ class OceanBaseRedisDb(RedisAble):
                     )
         return False
 
+    @release_connection
     def queue_consumer(self, queue_name, group_name, consumer_name, msg_id=b">"):
         """
             消费者拉取消息：
@@ -463,6 +509,7 @@ class OceanBaseRedisDb(RedisAble):
                 )
         return None
 
+    @release_connection
     def get_pending_msg(self, queue, group_name):
         """
             获取消费者组 {group_name} 对消息队列 {queue} 已经读取，但是没有 ACK 的消息。
@@ -544,7 +591,7 @@ class OceanBaseRedisDb(RedisAble):
     '''
         消息重新入队
     '''
-
+    @release_connection
     def requeue_msg(self, queue: str, group_name: str, msg_id: object):
         """
             将未 ack 的消息重新入队列
@@ -570,6 +617,7 @@ class OceanBaseRedisDb(RedisAble):
                     "RedisDB.requeue_msg " + str(queue) + " got exception: " + str(e)
                 )
 
+    @release_connection
     def xack(self, queue: str, group_name: str, msg_id: object):
         """
             提交消息 ack
@@ -578,6 +626,7 @@ class OceanBaseRedisDb(RedisAble):
             "update message_consumption set ack = true where stream = %s and group_name = %s and "
             "message_id = %s", (queue, group_name, msg_id))
 
+    @release_connection
     def queue_info(self, queue: str, group_name: str) -> dict | None:
         """
             获取消息队列，某个消费者组的消费情况。本项目用到的属性有：
@@ -591,7 +640,7 @@ class OceanBaseRedisDb(RedisAble):
                 cursor = self.db.execute_sql(
                     "select count(1) from message_subscribe where stream = %s and group_name = %s", (queue, group_name))
                 ret = cursor.fetchone()
-                if ret == 0:
+                if ret is None or ret[0] == 0:
                     return None
                 else:
                     cursor = self.db.execute_sql(
@@ -635,6 +684,13 @@ class MysqlDistributedLock:
         # blocking_timeout 没用到，预留
         self.blocking_timeout = blocking_timeout
 
+    def _release_connection(self):
+        """
+        Release the current thread's database connection back to the pool.
+        """
+        if isinstance(self.db, RetryingPooledMySQLDatabase):
+            self.db.manual_close()
+
     def acquire(self):
         """
             获取锁
@@ -677,6 +733,8 @@ class MysqlDistributedLock:
             else:
                 logging.info(f"lock acquire failed:{self.lock_key}-{self.lock_value}-{e}")
             return False
+        finally:
+            self._release_connection()
 
     def release(self):
         """
@@ -705,6 +763,8 @@ class MysqlDistributedLock:
             else:
                 logging.warning(f"release lock failed:{self.lock_key}-{self.lock_value}-{e}")
             return False
+        finally:
+            self._release_connection()
 
 
 if __name__ == '__main__':
