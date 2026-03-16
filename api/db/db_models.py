@@ -254,8 +254,11 @@ class RetryingPooledMySQLDatabase(PooledMySQLDatabase):
         This method should be called after database operations to prevent connection
         pool exhaustion, especially in scenarios with many concurrent operations.
         """
-        if not self.is_closed():
-            self.close()
+        try:
+            if not self.is_closed():
+                self.close()
+        except Exception:
+            pass
 
     def execute_sql(self, sql, params=None, commit=True):
         for attempt in range(self.max_retries + 1):

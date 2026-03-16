@@ -3,7 +3,6 @@ import json
 import logging
 import time
 import uuid
-from contextlib import contextmanager
 from datetime import datetime, timedelta
 from decimal import Decimal
 from functools import wraps
@@ -46,21 +45,6 @@ def release_connection(func):
                 self.db.manual_close()
     return wrapper
 
-
-@contextmanager
-def db_connection(db):
-    """
-    Context manager to ensure database connection is returned to pool after use.
-
-    Peewee's PooledMySQLDatabase does not automatically return connections to the pool
-    after execute_sql(). This context manager ensures connections are properly released
-    to prevent connection pool exhaustion under high concurrency.
-    """
-    try:
-        yield db
-    finally:
-        if isinstance(db, RetryingPooledMySQLDatabase):
-            db.manual_close()
 
 
 # 由于这里数据库 message 返回值是str,而 redis_conn stream 接口返回的是 dict,所以 RedisMsg 接口初始化略有不同，因此单独声明一个 RedisMsg
@@ -561,7 +545,6 @@ class OceanBaseRedisDb(RedisAble):
         return []
 
     # 获取本消费组内没有 ack的消息
-    @release_connection
     def get_unacked_iterator(self, queue_names: list[str], group_name, consumer_name):
         """
             获取消费者组未 ack 的消息，返回一个迭代器
