@@ -1,3 +1,8 @@
+> [!IMPORTANT]
+> **Maintenance Notice**
+>
+> PowerRAG Community Edition is no longer maintained. OceanBase support and future improvements will continue in the official [RAGFlow](https://github.com/infiniflow/ragflow) project. **Please migrate to RAGFlow for continued updates and support.**
+
 <p align="center">
     <a href="https://github.com/oceanbase/powerrag">
         <img alt="PowerRAG Logo" src="https://img.shields.io/badge/PowerRAG-blue" width="50%" />

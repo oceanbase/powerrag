@@ -1,3 +1,8 @@
+> [!IMPORTANT]
+> **维护说明**
+>
+> PowerRAG 社区版已停止维护。OceanBase 相关功能及后续优化将统一在官方 [RAGFlow](https://github.com/infiniflow/ragflow) 项目中持续推进。**请迁移至 RAGFlow，以获取后续更新与支持。**
+
 <p align="center">
     <a href="https://github.com/oceanbase/powerrag">
         <img alt="PowerRAG Logo" src="https://img.shields.io/badge/PowerRAG-blue" width="50%" />
